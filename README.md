@@ -8,11 +8,11 @@ Watching the 2026 World Cup, I kept noticing the **Match Momentum** graphic on t
 
 Argentina 3–2 Egypt, Round of 16, July 7 2026 (Mercedes-Benz Stadium, Atlanta). Egypt led 2–0 in the 75th minute; Argentina became the first team in World Cup history to win a knockout match in regulation after trailing by two that late. Romero 79', Messi 84', Enzo Fernández 90+2'.
 
-The momentum chart makes the story visible in one glance: ~70 minutes of red, then a blue wall.
+The momentum chart makes the story visible in one glance: Argentina on top for most of the match, two sharp Egyptian counter-spikes (both goals), then a blue wall at the end.
 
 ## The model
 
-Each threat event (shot, chance, goal, sustained pressure) injects "momentum energy" for its team, which **decays exponentially** (half-life ≈ 3 min). Per-minute energy is smoothed with a Gaussian kernel and the two teams are plotted as mirrored fills around a center line — the same visual grammar as the broadcast graphic.
+Each threat event (shot, chance, goal, sustained pressure) injects "momentum energy" for its team, which **decays exponentially** (half-life ≈ 3 min). The chart shows **net momentum** (home energy minus away energy), smoothed with a Gaussian kernel: at any moment only one team is on top, matching the visual grammar of FIFA's broadcast graphic and The Athletic's momentum charts. When one side has momentum, the other by definition doesn't.
 
 ```
 momentum_team(t) = Σ over events e:  w_e · exp(-λ · (t - t_e))   for t ≥ t_e

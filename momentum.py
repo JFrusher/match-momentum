@@ -3,9 +3,10 @@ Match Momentum — a FIFA-broadcast-style momentum chart, rebuilt from scratch.
 
 Model: each threat event (shot, chance, goal, sustained pressure) injects
 "momentum energy" for its team, which decays exponentially over the following
-minutes. Per-minute energy is smoothed with a Gaussian kernel and the two
-teams are plotted as mirrored area fills around a center line — exactly the
-visual grammar of the FIFA 2026 broadcast graphic.
+minutes. The chart shows NET momentum (home energy minus away energy), so at
+any moment only one team is "on top" — when one side has momentum, the other
+doesn't. This matches the visual grammar of the FIFA 2026 broadcast graphic
+and The Athletic's momentum charts.
 
 Usage:  python momentum.py [events.json] [output.png]
 """
@@ -55,16 +56,19 @@ def main(events_path="events.json", out_path="momentum_arg_egy.png"):
 
     y_home = build_series(events, home, t)
     y_away = build_series(events, away, t)
-    peak = max(y_home.max(), y_away.max())
+    net = y_home - y_away
+    peak = np.abs(net).max()
     if peak == 0:
         raise ValueError(f"no threat events found for {home}/{away} in {events_path}")
-    y_home, y_away = y_home / peak, y_away / peak
+    net = net / peak
+    y_home = np.where(net > 0, net, 0)
+    y_away = np.where(net < 0, -net, 0)
 
     fig, ax = plt.subplots(figsize=(12, 5.2), dpi=200)
     fig.patch.set_facecolor(BG_FIG)
     ax.set_facecolor(BG_PANEL)
 
-    # mirrored fills
+    # net momentum: one side at a time, FIFA-broadcast style
     ax.fill_between(t, 0, y_home, color=home_color, alpha=0.95, lw=0)
     ax.fill_between(t, 0, -y_away, color=away_color, alpha=0.95, lw=0)
     ax.axhline(0, color="#d9d9d9", lw=2)

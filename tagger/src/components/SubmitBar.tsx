@@ -1,20 +1,23 @@
 import { useMatchStore } from "../store/matchStore";
-import { eventItems, teamNames } from "../data/rugbyInline";
-
-function teamLabelFor(team: string | null): string {
-  if (team === "home") return teamNames.home;
-  if (team === "away") return teamNames.away;
-  if (team === "neutral") return "Neutral";
-  return "—";
-}
+import { useSportConfig } from "../hooks/useSportConfig";
+import { eventLabel } from "../sport-config";
 
 export function SubmitBar() {
+  const config = useSportConfig();
+  const teamNames = useMatchStore((s) => s.teamNames);
   const stagedTeam = useMatchStore((s) => s.stagedTeam);
   const stagedType = useMatchStore((s) => s.stagedType);
   const stagedModifier = useMatchStore((s) => s.stagedModifier);
   const submitStaged = useMatchStore((s) => s.submitStaged);
 
-  const typeLabel = eventItems.find((i) => i.key === stagedType)?.label ?? "—";
+  function teamLabelFor(team: string | null): string {
+    if (team === "home") return teamNames.home;
+    if (team === "away") return teamNames.away;
+    if (team === "neutral") return config.teamColumn.neutralLabel;
+    return "—";
+  }
+
+  const typeLabel = stagedType ? eventLabel(config, stagedType) : "—";
 
   return (
     <div className="submit-bar">

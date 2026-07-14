@@ -1,0 +1,16 @@
+{
+  "sportKey": "football",
+  "displayName": "Football",
+  "teamColumn": { "includeNeutral": true, "neutralLabel": "Neutral / Stoppage" },
+  "eventColumn": {
+    "items": [
+      { "key": "goal", "label": "Goal", "points": 1, "kind": "flat" },
+      { "key": "shot", "label": "Shot", "points": 0, "kind": "flat" },
+      { "key": "chance", "label": "Chance", "points": 0, "kind": "flat" },
+      { "key": "pressure", "label": "Sustained Pressure", "points": 0, "kind": "flat" },
+      { "key": "penalty_missed", "label": "Penalty Missed", "points": 0, "kind": "flat" }
+    ]
+  },
+  "modifierGroups": {},
+  "maxSaneMinute": 125
+}

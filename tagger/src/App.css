@@ -165,3 +165,112 @@ kbd {
   color: #9a9fa8;
   min-width: 5ch;
 }
+
+.timeline-derived {
+  color: #9a9fa8;
+  font-size: 0.85em;
+}
+
+.sport-select {
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid #3f434b;
+  background: #22252c;
+  color: inherit;
+  font-size: 0.9rem;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.modal {
+  background: #1b1e24;
+  border: 1px solid #3f434b;
+  border-radius: 10px;
+  padding: 1.25rem 1.5rem;
+  min-width: 320px;
+  max-width: 90vw;
+}
+
+.modal h2 {
+  margin: 0 0 1rem;
+  font-size: 1.05rem;
+}
+
+.modal-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.modal-options button,
+.modal-actions button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid #2f333b;
+  background: #22252c;
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.95rem;
+}
+
+.modal-options button:hover,
+.modal-actions button:hover {
+  border-color: #4c5eff;
+}
+
+.modal-hint {
+  margin: 0.9rem 0 0;
+  color: #6b7078;
+  font-size: 0.8em;
+}
+
+.modal-warning {
+  color: #e8b84c;
+  font-size: 0.85em;
+  margin: 0 0 0.75rem;
+}
+
+.derived-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.derived-fields label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.9rem;
+}
+
+.derived-fields input {
+  width: 6ch;
+  padding: 0.3rem 0.4rem;
+  border-radius: 6px;
+  border: 1px solid #3f434b;
+  background: #22252c;
+  color: inherit;
+  font-size: 0.95rem;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.modal-actions .submit-button {
+  border: none;
+}

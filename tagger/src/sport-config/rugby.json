@@ -1,0 +1,45 @@
+{
+  "sportKey": "rugby",
+  "displayName": "Rugby Union",
+  "teamColumn": { "includeNeutral": true, "neutralLabel": "Neutral / Stoppage" },
+  "eventColumn": {
+    "items": [
+      {
+        "key": "try",
+        "label": "Try",
+        "points": 5,
+        "kind": "flat",
+        "triggersFollowUp": {
+          "question": "Was the conversion successful?",
+          "options": [
+            { "label": "Yes", "logEvent": "conversion", "pointsDelta": 2 },
+            { "label": "No", "logEvent": "conversion_missed", "pointsDelta": 0 }
+          ]
+        }
+      },
+      { "key": "penalty_kick", "label": "Penalty Kick", "points": 3, "kind": "flat" },
+      { "key": "drop_goal", "label": "Drop Goal", "points": 3, "kind": "flat" },
+      { "key": "turnover_won", "label": "Turnover Won", "points": 0, "kind": "flat" },
+      { "key": "linebreak", "label": "Linebreak", "points": 0, "kind": "flat" },
+      {
+        "key": "phase_sequence",
+        "label": "Phase Sequence",
+        "points": 0,
+        "kind": "derived",
+        "derivedInputs": [
+          { "field": "metres_gained", "label": "Metres gained", "default": 0, "min": 0, "max": 100, "step": 5 },
+          { "field": "end_metres_from_line", "label": "End metres from line", "default": 50, "min": 0, "max": 100, "step": 5 },
+          { "field": "linebreaks", "label": "Linebreaks", "default": 0, "min": 0, "max": 5, "step": 1 }
+        ]
+      },
+      { "key": "sin_bin", "label": "Sin Bin", "points": 0, "kind": "markerOnly", "modifierGroupId": "card_colour" }
+    ]
+  },
+  "modifierGroups": {
+    "card_colour": [
+      { "id": "yellow", "label": "Yellow" },
+      { "id": "red", "label": "Red" }
+    ]
+  },
+  "maxSaneMinute": 130
+}

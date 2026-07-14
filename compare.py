@@ -17,7 +17,9 @@ Usage: python compare.py
 import json
 import numpy as np
 import matplotlib.pyplot as plt
-from momentum import build_series, RESOLUTION, BG_PANEL, BG_FIG
+from core.engine import MomentumEngine
+from core.chart import BG_PANEL, BG_FIG
+from translators.football import FootballSport
 
 # ------------------------------------------------------------- traced bars
 # (minute, value 0..1) eyeballed from the Flashscore graphics.
@@ -51,12 +53,15 @@ TUR_REF = {
 
 def panel(ax, events_file, ref_home, ref_away, home_color, away_color,
           title, tmax):
-    with open(events_file) as f:
+    with open(events_file, encoding="utf-8") as f:
         data = json.load(f)
-    t = np.linspace(0, tmax, tmax * RESOLUTION + 1)
+    sport = FootballSport()
+    engine = MomentumEngine(half_life_minutes=sport.decay_half_life)
+    events = sport.translate(data["events"])
+    t = np.linspace(0, tmax, tmax * engine.resolution + 1)
     home, away = data["teams"]["home"], data["teams"]["away"]
-    yh = build_series(data["events"], home, t)
-    ya = build_series(data["events"], away, t)
+    yh = engine.team_series(events, home, t)
+    ya = engine.team_series(events, away, t)
     peak = max(yh.max(), ya.max())
     yh, ya = yh / peak, ya / peak
 
@@ -90,9 +95,9 @@ def panel(ax, events_file, ref_home, ref_away, home_color, away_color,
 fig, axes = plt.subplots(2, 1, figsize=(12, 9), dpi=200)
 fig.patch.set_facecolor(BG_FIG)
 
-panel(axes[0], "events.json", ARG_REF, EGY_REF, "#6CACE4", "#CE1126",
+panel(axes[0], "examples/events_arg_egy.json", ARG_REF, EGY_REF, "#6CACE4", "#CE1126",
       "ARGENTINA 3–2 EGYPT  ·  Round of 16", 95)
-panel(axes[1], "events_aus_tur.json", AUS_REF, TUR_REF, "#FFC72C", "#E30A17",
+panel(axes[1], "examples/events_aus_tur.json", AUS_REF, TUR_REF, "#FFC72C", "#E30A17",
       "AUSTRALIA 2–0 TÜRKIYE  ·  Group D  ·  first half (reference is a HT snapshot)", 48)
 
 fig.suptitle("HOW CLOSE IS THE REBUILD?  Our momentum model (white) vs a published graphic (bars)",

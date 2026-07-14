@@ -1,0 +1,32 @@
+{
+  "match": "Synthetic rugby union demo — not a real fixture",
+  "note": "Hand-written to exercise the RugbySport translator's full event vocabulary (scores, phase-sequence territory, turnovers, a sin bin) end to end. Not calibrated against any real broadcast graphic.",
+  "teams": {"home": "NZL", "away": "RSA"},
+  "title": "MATCH MOMENTUM  —  NEW ZEALAND vs SOUTH AFRICA",
+  "colors": {"home": "#000000", "away": "#006633"},
+  "footer": "Synthetic demo data · rugby union translator",
+  "events": [
+    {"minute": 3,  "team": "NZL", "type": "phase_sequence", "metres_gained": 25, "end_metres_from_line": 30, "linebreaks": 0},
+    {"minute": 7,  "team": "RSA", "type": "penalty_kick", "label": "Pollard pen 7'"},
+    {"minute": 12, "team": "NZL", "type": "phase_sequence", "metres_gained": 45, "end_metres_from_line": 8, "linebreaks": 1},
+    {"minute": 14, "team": "NZL", "type": "try", "label": "Barrett try 14'"},
+    {"minute": 15, "team": "NZL", "type": "conversion", "label": "Mo'unga con 15'"},
+    {"minute": 22, "team": "RSA", "type": "turnover_won"},
+    {"minute": 25, "team": "RSA", "type": "phase_sequence", "metres_gained": 30, "end_metres_from_line": 15, "linebreaks": 0},
+    {"minute": 28, "team": "RSA", "type": "penalty_kick", "label": "Pollard pen 28'"},
+    {"minute": 34, "team": "NZL", "type": "sin_bin", "label": "NZL yellow 34'"},
+    {"minute": 37, "team": "RSA", "type": "phase_sequence", "metres_gained": 38, "end_metres_from_line": 5, "linebreaks": 1},
+    {"minute": 39, "team": "RSA", "type": "try", "label": "Kolbe try 39'"},
+    {"minute": 40, "team": "RSA", "type": "conversion", "label": "Pollard con 40'"},
+
+    {"minute": 48, "team": "NZL", "type": "phase_sequence", "metres_gained": 20, "end_metres_from_line": 40, "linebreaks": 0},
+    {"minute": 53, "team": "NZL", "type": "turnover_won"},
+    {"minute": 55, "team": "NZL", "type": "drop_goal", "label": "Mo'unga drop 55'"},
+    {"minute": 61, "team": "RSA", "type": "phase_sequence", "metres_gained": 42, "end_metres_from_line": 10, "linebreaks": 1},
+    {"minute": 64, "team": "RSA", "type": "penalty_kick", "label": "Pollard pen 64'"},
+    {"minute": 70, "team": "NZL", "type": "phase_sequence", "metres_gained": 50, "end_metres_from_line": 3, "linebreaks": 2},
+    {"minute": 72, "team": "NZL", "type": "try", "label": "Savea try 72'"},
+    {"minute": 73, "team": "NZL", "type": "conversion", "label": "Mo'unga con 73'"},
+    {"minute": 78, "team": "RSA", "type": "phase_sequence", "metres_gained": 28, "end_metres_from_line": 22, "linebreaks": 0}
+  ]
+}

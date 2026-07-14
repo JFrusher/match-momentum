@@ -32,13 +32,32 @@ Limitations: two matches, references traced by eye, and event streams calibrated
 
 ## Data honesty
 
-Goal and penalty minutes are real (per ESPN / Sky Sports match reports). The granular event stream (shots, pressure spells) is **reconstructed from match report narratives** to illustrate the model — official event-level data isn't public. Swap in a real event feed (Opta/StatsBomb) via `events.json` and the pipeline works unchanged.
+Goal and penalty minutes are real (per ESPN / Sky Sports match reports). The granular event stream (shots, pressure spells) is **reconstructed from match report narratives** to illustrate the model — official event-level data isn't public. Swap in a real event feed (Opta/StatsBomb) via a new `sources/` adapter and the decay/smoothing pipeline works unchanged.
+
+## Architecture
+
+The decay math and chart renderer don't know what sport they're drawing. Three independent pieces compose to produce a chart:
+
+```
+DataSource.parse()  ->  Sport.translate()  ->  MomentumEngine.compute()  ->  chart.render()
+   (raw provider          (raw events ->           (decay + smoothing,        (figure, driven
+    format in)              StandardEvent)           sport-agnostic)            by ChartProfile)
+```
+
+- **`core/`** — the sport-agnostic engine: `schema.py` (`StandardEvent`, the only shape the math ever sees), `engine.py` (`MomentumEngine`, the exponential-decay + Gaussian-smoothing math, unchanged since the original model), `chart.py` (the FIFA-style area-chart renderer, driven by a `ChartProfile` rather than hardcoded match structure).
+- **`translators/`** — one module per sport (`football.py`, `rugby.py`), each a `BaseSport` implementing `translate(raw_events) -> list[StandardEvent]` plus match structure (duration, half-time marker, decay half-life, axis labels). Static event→weight tables live alongside as JSON (`football_weights.json`, `rugby_weights.json`); sports that need real computation — rugby's phase-play territory scoring has no discrete "shot" to key off, so its weight is derived from metres gained / field position / linebreaks — override `translate()` in code instead of a flat lookup.
+- **`sources/`** — one module per data provider (currently just `custom_json.py`, the `events.json` shape used throughout this repo), parsing a provider's raw match data into a common shape. Kept independent of `translators/` so any sport works with any source instead of one class per (sport, provider) pair.
+
+To add a new sport: implement `BaseSport` in `translators/`, register it in `translators/__init__.py`'s `SPORTS` dict, run with `--sport yourname`. `translators/rugby.py` is a worked example — see its module docstring for how territory-based threat and cards (marker-only, not fed into the decay sum) are modeled, and why.
+
+To add a new data provider (Opta, StatsBomb, ...): implement `BaseDataSource` in `sources/`, mapping its raw fields into whatever shape your chosen `Sport.translate()` expects.
 
 ## Run it
 
 ```bash
 pip install numpy matplotlib scipy
-python momentum.py events.json momentum_arg_egy.png
+python momentum.py examples/events_arg_egy.json momentum_arg_egy.png
+python momentum.py examples/events_rugby_demo.json momentum_rugby_demo.png --sport rugby
 ```
 
-Edit `events.json` to chart any match.
+Edit an `examples/*.json` file (or point at your own) to chart any match. `events_rugby_demo.json` is hand-written synthetic data exercising the rugby translator's event vocabulary — not calibrated against a real broadcast graphic the way the football examples are.

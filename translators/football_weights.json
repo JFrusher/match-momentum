@@ -1,0 +1,8 @@
+{
+  "pressure": 0.6,
+  "chance": 0.7,
+  "shot": 0.8,
+  "goal": 1.8,
+  "penalty_missed": 1.2,
+  "_default": 0.5
+}

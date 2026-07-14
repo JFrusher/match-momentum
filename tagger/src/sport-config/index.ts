@@ -23,3 +23,20 @@ export function eventLabel(config: SportConfig, typeKey: string): string {
   const humanized = typeKey.replace(/_/g, " ");
   return humanized.charAt(0).toUpperCase() + humanized.slice(1);
 }
+
+// Full vocabulary: Column-2 entries plus follow-up-only types, with the real
+// match points each is worth (entry.points / option.pointsDelta).
+export function vocabPoints(config: SportConfig): Record<string, number> {
+  const points: Record<string, number> = {};
+  for (const item of config.eventColumn.items) {
+    points[item.key] = item.points;
+    for (const opt of item.triggersFollowUp?.options ?? []) {
+      if (opt.logEvent) points[opt.logEvent] = opt.pointsDelta ?? 0;
+    }
+  }
+  return points;
+}
+
+export function knownVocab(config: SportConfig): Set<string> {
+  return new Set(Object.keys(vocabPoints(config)));
+}

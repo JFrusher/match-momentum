@@ -274,3 +274,169 @@ kbd {
 .modal-actions .submit-button {
   border: none;
 }
+
+.scoreboard {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  font-size: 0.95rem;
+}
+
+.scoreboard-score {
+  font-variant-numeric: tabular-nums;
+  font-size: 1.3rem;
+  font-weight: 600;
+}
+
+.scoreboard-team {
+  color: #9a9fa8;
+  max-width: 12ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scoreboard-override {
+  color: #e8b84c;
+  font-size: 0.8em;
+}
+
+.new-match-button,
+.danger-button {
+  padding: 0.4rem 0.7rem;
+  border-radius: 6px;
+  border: 1px solid #5a3038;
+  background: #2a1d21;
+  color: #e58a95;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.new-match-button:hover,
+.danger-button:hover {
+  border-color: #e58a95;
+}
+
+.timeline-row {
+  cursor: pointer;
+}
+
+.timeline-row:hover {
+  outline: 1px solid #2f333b;
+}
+
+.timeline-row-editing {
+  cursor: default;
+  display: block;
+}
+
+.timeline-edited {
+  color: #6b7078;
+  font-size: 0.8em;
+  font-style: italic;
+}
+
+.timeline-edit-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+  padding: 0.25rem 0;
+}
+
+.timeline-edit-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+  color: #9a9fa8;
+}
+
+.timeline-edit-form select,
+.timeline-edit-form input {
+  padding: 0.3rem 0.4rem;
+  border-radius: 6px;
+  border: 1px solid #3f434b;
+  background: #22252c;
+  color: #e8e8e8;
+  font-size: 0.9rem;
+}
+
+.timeline-edit-form input[type="number"] {
+  width: 8ch;
+}
+
+.timeline-edit-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.timeline-edit-actions button {
+  padding: 0.35rem 0.7rem;
+  border-radius: 6px;
+  border: 1px solid #2f333b;
+  background: #22252c;
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.export-panel {
+  margin-top: 1.5rem;
+  padding: 0.75rem 1rem 1rem;
+  background: #1b1e24;
+  border-radius: 8px;
+}
+
+.export-panel h2 {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #9a9fa8;
+  margin: 0 0 0.75rem;
+}
+
+.export-teams {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.export-teams label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+  color: #9a9fa8;
+}
+
+.export-teams input {
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid #3f434b;
+  background: #22252c;
+  color: #e8e8e8;
+  font-size: 0.95rem;
+}
+
+.export-checks {
+  list-style: none;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+}
+
+.export-error {
+  color: #e58a95;
+}
+
+.export-warning {
+  color: #e8b84c;
+}
+
+.export-info {
+  color: #9a9fa8;
+}

@@ -29,6 +29,9 @@ export function ClockController() {
         value={Math.min(elapsedMs, MAX_SCRUB_MS)}
         disabled={running}
         onChange={(e) => scrubClockTo(Number(e.target.value))}
+        // Drop focus once the drag ends — a focused slider is an editable
+        // target, which would swallow every tagging hotkey until a click-away.
+        onPointerUp={(e) => e.currentTarget.blur()}
         aria-label="Manually scrub match clock"
       />
     </div>

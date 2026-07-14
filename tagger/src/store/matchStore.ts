@@ -1,6 +1,7 @@
 import { create } from "zustand";
-import type { TaggedEvent, TeamRole } from "./types";
-import { DEFAULT_SPORT_KEY, SPORT_CONFIGS } from "../sport-config";
+import { subscribeWithSelector } from "zustand/middleware";
+import type { MatchSnapshot, TaggedEvent, TeamRole } from "./types";
+import { DEFAULT_SPORT_KEY, SPORT_CONFIGS, vocabPoints } from "../sport-config";
 import type { EventTypeEntry, FollowUpSpec } from "../sport-config";
 
 interface ClockState {
@@ -24,6 +25,21 @@ interface DerivedDraft {
   values: Record<string, number>;
 }
 
+// Shallow undo stack entries — each records how to reverse one mutation.
+type UndoAction =
+  | { kind: "add"; eventId: string }
+  | { kind: "edit"; previous: TaggedEvent }
+  | { kind: "delete"; event: TaggedEvent };
+
+const UNDO_DEPTH = 10;
+
+export interface EventPatch {
+  team: TeamRole;
+  type: string;
+  modifier?: string;
+  minute: number;
+}
+
 interface MatchState {
   sportKey: string;
   teamNames: { home: string; away: string };
@@ -36,8 +52,12 @@ interface MatchState {
   derivedDraft: DerivedDraft | null;
   resetPending: boolean;
   events: TaggedEvent[];
+  scoreOverride: { home: number; away: number };
+  undoStack: UndoAction[];
+  hydrated: boolean;
 
   setSportKey: (key: string) => void;
+  setTeamName: (role: "home" | "away", name: string) => void;
   setStagedTeam: (team: TeamRole) => void;
   stageEventType: (entryKey: string) => void;
   stageModifier: (modifier: string) => void;
@@ -51,6 +71,12 @@ interface MatchState {
   submitDerived: () => void;
   cancelDerived: () => void;
 
+  editEvent: (id: string, patch: EventPatch) => void;
+  deleteEvent: (id: string) => void;
+  undo: () => void;
+
+  adjustScoreOverride: (team: "home" | "away", delta: number) => void;
+
   startClock: () => void;
   pauseClock: () => void;
   toggleClock: () => void;
@@ -58,6 +84,9 @@ interface MatchState {
   cancelReset: () => void;
   confirmReset: () => void;
   scrubClockTo: (ms: number) => void;
+
+  resetMatch: () => void;
+  hydrate: (snapshot: MatchSnapshot) => void;
 
   getElapsedMs: () => number;
 }
@@ -67,178 +96,287 @@ function findEntry(sportKey: string, entryKey: string | null): EventTypeEntry | 
   return SPORT_CONFIGS[sportKey]?.eventColumn.items.find((i) => i.key === entryKey);
 }
 
-export const useMatchStore = create<MatchState>((set, get) => {
-  function currentMinute(): number {
-    return Math.round((get().getElapsedMs() / 60000) * 100) / 100;
-  }
+function pointsFor(sportKey: string, typeKey: string): number {
+  return vocabPoints(SPORT_CONFIGS[sportKey])[typeKey] ?? 0;
+}
 
-  function makeEvent(fields: Omit<TaggedEvent, "id" | "createdAt">): TaggedEvent {
-    return { id: crypto.randomUUID(), createdAt: Date.now(), ...fields };
-  }
+export const useMatchStore = create<MatchState>()(
+  subscribeWithSelector((set, get) => {
+    function currentMinute(): number {
+      return Math.round((get().getElapsedMs() / 60000) * 100) / 100;
+    }
 
-  return {
-    sportKey: DEFAULT_SPORT_KEY,
-    teamNames: { home: "Team A", away: "Team B" },
-    clock: { running: false, baseMs: 0, startedAt: null },
-    mode: "normal",
-    stagedTeam: null,
-    stagedType: null,
-    stagedModifier: null,
-    followUp: null,
-    derivedDraft: null,
-    resetPending: false,
-    events: [],
+    function makeEvent(fields: Omit<TaggedEvent, "id" | "createdAt">): TaggedEvent {
+      return { id: crypto.randomUUID(), createdAt: Date.now(), ...fields };
+    }
 
-    // Staged type/modifier belong to the old sport's vocabulary; already-logged
-    // events are kept (Phase 4 export validation flags any stale types).
-    setSportKey: (key) => {
-      if (!(key in SPORT_CONFIGS)) return;
-      set({
-        sportKey: key,
-        stagedType: null,
-        stagedModifier: null,
-        mode: "normal",
-        followUp: null,
-        derivedDraft: null,
-      });
-    },
+    function pushUndo(stack: UndoAction[], action: UndoAction): UndoAction[] {
+      return [...stack.slice(-(UNDO_DEPTH - 1)), action];
+    }
 
-    setStagedTeam: (team) => set({ stagedTeam: team }),
+    return {
+      sportKey: DEFAULT_SPORT_KEY,
+      teamNames: { home: "Team A", away: "Team B" },
+      clock: { running: false, baseMs: 0, startedAt: null },
+      mode: "normal",
+      stagedTeam: null,
+      stagedType: null,
+      stagedModifier: null,
+      followUp: null,
+      derivedDraft: null,
+      resetPending: false,
+      events: [],
+      scoreOverride: { home: 0, away: 0 },
+      undoStack: [],
+      hydrated: false,
 
-    // Single entry point for Column 2 (hotkey or click) — routes by kind:
-    // derived opens the input panel; flat/markerOnly without a modifier group
-    // auto-submits; with a group, stages and waits for the modifier.
-    stageEventType: (entryKey) => {
-      const { sportKey, mode } = get();
-      if (mode !== "normal") return;
-      const entry = findEntry(sportKey, entryKey);
-      if (!entry) return;
-      if (entry.kind === "derived") {
-        const values: Record<string, number> = {};
-        for (const input of entry.derivedInputs ?? []) values[input.field] = input.default ?? 0;
-        set({ stagedType: entry.key, stagedModifier: null, mode: "derivedInput", derivedDraft: { entry, values } });
-        return;
-      }
-      set({ stagedType: entry.key, stagedModifier: null });
-      if (!entry.modifierGroupId) get().submitStaged();
-    },
-
-    stageModifier: (modifier) => set({ stagedModifier: modifier }),
-
-    submitStaged: () => {
-      const { sportKey, stagedTeam, stagedType, stagedModifier, events, mode } = get();
-      if (mode !== "normal" || !stagedTeam || !stagedType) return;
-      const event = makeEvent({
-        minute: currentMinute(),
-        team: stagedTeam,
-        type: stagedType,
-        modifier: stagedModifier ?? undefined,
-      });
-      set({ events: [...events, event], stagedType: null, stagedModifier: null });
-
-      // Neutral events are excluded from export, so a follow-up (conversion
-      // after a neutral "try") would be meaningless — only home/away trigger it.
-      const entry = findEntry(sportKey, stagedType);
-      if (entry?.triggersFollowUp && stagedTeam !== "neutral") {
+      // Staged type/modifier belong to the old sport's vocabulary; already-logged
+      // events are kept (export validation flags any stale types).
+      setSportKey: (key) => {
+        if (!(key in SPORT_CONFIGS)) return;
         set({
-          mode: "followUp",
-          followUp: { spec: entry.triggersFollowUp, team: stagedTeam, primaryEventId: event.id },
+          sportKey: key,
+          stagedType: null,
+          stagedModifier: null,
+          mode: "normal",
+          followUp: null,
+          derivedDraft: null,
         });
-      }
-    },
+      },
 
-    clearLastStaged: () => {
-      const { stagedModifier, stagedType } = get();
-      if (stagedModifier) {
-        set({ stagedModifier: null });
-      } else if (stagedType) {
-        set({ stagedType: null });
-      }
-    },
+      setTeamName: (role, name) =>
+        set({ teamNames: { ...get().teamNames, [role]: name } }),
 
-    resolveFollowUp: (optionIndex) => {
-      const { followUp, events } = get();
-      if (!followUp) return;
-      const option = followUp.spec.options[optionIndex];
-      if (!option) return;
-      if (option.logEvent) {
+      setStagedTeam: (team) => set({ stagedTeam: team }),
+
+      // Single entry point for Column 2 (hotkey or click) — routes by kind:
+      // derived opens the input panel; flat/markerOnly without a modifier group
+      // auto-submits; with a group, stages and waits for the modifier.
+      stageEventType: (entryKey) => {
+        const { sportKey, mode } = get();
+        if (mode !== "normal") return;
+        const entry = findEntry(sportKey, entryKey);
+        if (!entry) return;
+        if (entry.kind === "derived") {
+          const values: Record<string, number> = {};
+          for (const input of entry.derivedInputs ?? []) values[input.field] = input.default ?? 0;
+          set({ stagedType: entry.key, stagedModifier: null, mode: "derivedInput", derivedDraft: { entry, values } });
+          return;
+        }
+        set({ stagedType: entry.key, stagedModifier: null });
+        if (!entry.modifierGroupId) get().submitStaged();
+      },
+
+      stageModifier: (modifier) => set({ stagedModifier: modifier }),
+
+      submitStaged: () => {
+        const { sportKey, stagedTeam, stagedType, stagedModifier, events, mode, undoStack } = get();
+        if (mode !== "normal" || !stagedTeam || !stagedType) return;
+        const entry = findEntry(sportKey, stagedType);
         const event = makeEvent({
           minute: currentMinute(),
-          team: followUp.team,
-          type: option.logEvent,
-          modifier: option.modifier,
-          followUpOf: followUp.primaryEventId,
+          team: stagedTeam,
+          type: stagedType,
+          modifier: stagedModifier ?? undefined,
+          points: entry?.points ?? 0,
         });
-        set({ events: [...events, event] });
-      }
-      set({ mode: "normal", followUp: null });
-    },
+        set({
+          events: [...events, event],
+          stagedType: null,
+          stagedModifier: null,
+          undoStack: pushUndo(undoStack, { kind: "add", eventId: event.id }),
+        });
 
-    // Escape path — the primary event (already logged) is unaffected.
-    dismissFollowUp: () => set({ mode: "normal", followUp: null }),
+        // Neutral events are excluded from export, so a follow-up (conversion
+        // after a neutral "try") would be meaningless — only home/away trigger it.
+        if (entry?.triggersFollowUp && stagedTeam !== "neutral") {
+          set({
+            mode: "followUp",
+            followUp: { spec: entry.triggersFollowUp, team: stagedTeam, primaryEventId: event.id },
+          });
+        }
+      },
 
-    setDerivedValue: (field, value) => {
-      const { derivedDraft } = get();
-      if (!derivedDraft) return;
-      set({ derivedDraft: { ...derivedDraft, values: { ...derivedDraft.values, [field]: value } } });
-    },
+      clearLastStaged: () => {
+        const { stagedModifier, stagedType } = get();
+        if (stagedModifier) {
+          set({ stagedModifier: null });
+        } else if (stagedType) {
+          set({ stagedType: null });
+        }
+      },
 
-    submitDerived: () => {
-      const { stagedTeam, derivedDraft, events } = get();
-      // No team staged -> keep the panel open; the panel shows a hint.
-      if (!derivedDraft || !stagedTeam) return;
-      const event = makeEvent({
-        minute: currentMinute(),
-        team: stagedTeam,
-        type: derivedDraft.entry.key,
-        derivedInputs: { ...derivedDraft.values },
-      });
-      set({
-        events: [...events, event],
-        mode: "normal",
-        derivedDraft: null,
-        stagedType: null,
-        stagedModifier: null,
-      });
-    },
+      resolveFollowUp: (optionIndex) => {
+        const { followUp, events, undoStack } = get();
+        if (!followUp) return;
+        const option = followUp.spec.options[optionIndex];
+        if (!option) return;
+        if (option.logEvent) {
+          const event = makeEvent({
+            minute: currentMinute(),
+            team: followUp.team,
+            type: option.logEvent,
+            modifier: option.modifier,
+            followUpOf: followUp.primaryEventId,
+            points: option.pointsDelta ?? 0,
+          });
+          set({
+            events: [...events, event],
+            undoStack: pushUndo(undoStack, { kind: "add", eventId: event.id }),
+          });
+        }
+        set({ mode: "normal", followUp: null });
+      },
 
-    // Cancels the whole event — no partial form makes sense for a derived event.
-    cancelDerived: () =>
-      set({ mode: "normal", derivedDraft: null, stagedType: null, stagedModifier: null }),
+      // Escape path — the primary event (already logged) is unaffected.
+      dismissFollowUp: () => set({ mode: "normal", followUp: null }),
 
-    startClock: () => {
-      const { clock } = get();
-      if (clock.running) return;
-      set({ clock: { ...clock, running: true, startedAt: Date.now() } });
-    },
+      setDerivedValue: (field, value) => {
+        const { derivedDraft } = get();
+        if (!derivedDraft) return;
+        set({ derivedDraft: { ...derivedDraft, values: { ...derivedDraft.values, [field]: value } } });
+      },
 
-    pauseClock: () => {
-      const { clock } = get();
-      if (!clock.running) return;
-      const elapsed = clock.baseMs + (clock.startedAt ? Date.now() - clock.startedAt : 0);
-      set({ clock: { running: false, baseMs: elapsed, startedAt: null } });
-    },
+      submitDerived: () => {
+        const { stagedTeam, derivedDraft, events, undoStack } = get();
+        // No team staged -> keep the panel open; the panel shows a hint.
+        if (!derivedDraft || !stagedTeam) return;
+        const event = makeEvent({
+          minute: currentMinute(),
+          team: stagedTeam,
+          type: derivedDraft.entry.key,
+          derivedInputs: { ...derivedDraft.values },
+          points: derivedDraft.entry.points,
+        });
+        set({
+          events: [...events, event],
+          mode: "normal",
+          derivedDraft: null,
+          stagedType: null,
+          stagedModifier: null,
+          undoStack: pushUndo(undoStack, { kind: "add", eventId: event.id }),
+        });
+      },
 
-    toggleClock: () => {
-      const { clock } = get();
-      if (clock.running) get().pauseClock();
-      else get().startClock();
-    },
+      // Cancels the whole event — no partial form makes sense for a derived event.
+      cancelDerived: () =>
+        set({ mode: "normal", derivedDraft: null, stagedType: null, stagedModifier: null }),
 
-    armReset: () => set({ resetPending: true }),
-    cancelReset: () => set({ resetPending: false }),
-    confirmReset: () =>
-      set({ clock: { running: false, baseMs: 0, startedAt: null }, resetPending: false }),
+      editEvent: (id, patch) => {
+        const { sportKey, events, undoStack } = get();
+        const existing = events.find((e) => e.id === id);
+        if (!existing) return;
+        const edited: TaggedEvent = {
+          ...existing,
+          team: patch.team,
+          type: patch.type,
+          modifier: patch.modifier,
+          minute: patch.minute,
+          // Type may have changed — points follow the type, not the old event.
+          points: pointsFor(sportKey, patch.type),
+          editedAt: Date.now(),
+        };
+        set({
+          events: events.map((e) => (e.id === id ? edited : e)),
+          undoStack: pushUndo(undoStack, { kind: "edit", previous: existing }),
+        });
+      },
 
-    scrubClockTo: (ms) => {
-      const { clock } = get();
-      const baseMs = Math.max(0, ms);
-      set({ clock: { ...clock, baseMs, startedAt: clock.running ? Date.now() : null } });
-    },
+      deleteEvent: (id) => {
+        const { events, undoStack } = get();
+        const existing = events.find((e) => e.id === id);
+        if (!existing) return;
+        set({
+          events: events.filter((e) => e.id !== id),
+          undoStack: pushUndo(undoStack, { kind: "delete", event: existing }),
+        });
+      },
 
-    getElapsedMs: () => {
-      const { clock } = get();
-      return clock.baseMs + (clock.running && clock.startedAt ? Date.now() - clock.startedAt : 0);
-    },
-  };
-});
+      undo: () => {
+        const { undoStack, events, mode } = get();
+        if (mode !== "normal") return;
+        const action = undoStack[undoStack.length - 1];
+        if (!action) return;
+        const rest = undoStack.slice(0, -1);
+        if (action.kind === "add") {
+          set({ events: events.filter((e) => e.id !== action.eventId), undoStack: rest });
+        } else if (action.kind === "edit") {
+          set({
+            events: events.map((e) => (e.id === action.previous.id ? action.previous : e)),
+            undoStack: rest,
+          });
+        } else {
+          set({ events: [...events, action.event], undoStack: rest });
+        }
+      },
+
+      adjustScoreOverride: (team, delta) => {
+        const { scoreOverride } = get();
+        set({ scoreOverride: { ...scoreOverride, [team]: scoreOverride[team] + delta } });
+      },
+
+      startClock: () => {
+        const { clock } = get();
+        if (clock.running) return;
+        set({ clock: { ...clock, running: true, startedAt: Date.now() } });
+      },
+
+      pauseClock: () => {
+        const { clock } = get();
+        if (!clock.running) return;
+        const elapsed = clock.baseMs + (clock.startedAt ? Date.now() - clock.startedAt : 0);
+        set({ clock: { running: false, baseMs: elapsed, startedAt: null } });
+      },
+
+      toggleClock: () => {
+        const { clock } = get();
+        if (clock.running) get().pauseClock();
+        else get().startClock();
+      },
+
+      armReset: () => set({ resetPending: true }),
+      cancelReset: () => set({ resetPending: false }),
+      confirmReset: () =>
+        set({ clock: { running: false, baseMs: 0, startedAt: null }, resetPending: false }),
+
+      scrubClockTo: (ms) => {
+        const { clock } = get();
+        const baseMs = Math.max(0, ms);
+        set({ clock: { ...clock, baseMs, startedAt: clock.running ? Date.now() : null } });
+      },
+
+      // New match: clears the match, keeps sport + team names (likely reused).
+      resetMatch: () =>
+        set({
+          clock: { running: false, baseMs: 0, startedAt: null },
+          mode: "normal",
+          stagedTeam: null,
+          stagedType: null,
+          stagedModifier: null,
+          followUp: null,
+          derivedDraft: null,
+          resetPending: false,
+          events: [],
+          scoreOverride: { home: 0, away: 0 },
+          undoStack: [],
+        }),
+
+      hydrate: (snapshot) => {
+        const sportKey = snapshot.sportKey in SPORT_CONFIGS ? snapshot.sportKey : DEFAULT_SPORT_KEY;
+        set({
+          sportKey,
+          teamNames: snapshot.teamNames,
+          events: snapshot.events,
+          scoreOverride: snapshot.scoreOverride,
+          clock: { running: false, baseMs: snapshot.clockMs, startedAt: null },
+          hydrated: true,
+        });
+      },
+
+      getElapsedMs: () => {
+        const { clock } = get();
+        return clock.baseMs + (clock.running && clock.startedAt ? Date.now() - clock.startedAt : 0);
+      },
+    };
+  }),
+);

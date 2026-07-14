@@ -1,21 +1,14 @@
+import { useState } from "react";
 import { useMatchStore } from "../../store/matchStore";
-import { useSportConfig } from "../../hooks/useSportConfig";
-import { eventLabel } from "../../sport-config";
-import { formatClock } from "../../utils/time";
+import { TimelineRow } from "./TimelineRow";
 
 export function TimelineLog() {
-  const config = useSportConfig();
-  const teamNames = useMatchStore((s) => s.teamNames);
   const events = useMatchStore((s) => s.events);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
   // createdAt tiebreak: rapid events share a rounded minute, and newest-first
   // must hold within the tie too (e.g. conversion above its try).
   const sorted = [...events].sort((a, b) => b.minute - a.minute || b.createdAt - a.createdAt);
-
-  function teamLabelFor(team: string): string {
-    if (team === "home") return teamNames.home;
-    if (team === "away") return teamNames.away;
-    return config.teamColumn.neutralLabel;
-  }
 
   return (
     <div className="timeline-log">
@@ -23,19 +16,13 @@ export function TimelineLog() {
       {sorted.length === 0 && <p className="empty-hint">No events logged yet</p>}
       <ul>
         {sorted.map((ev) => (
-          <li key={ev.id}>
-            <span className="timeline-minute">{formatClock(ev.minute * 60000)}</span>
-            <span className="timeline-team">{teamLabelFor(ev.team)}</span>
-            <span className="timeline-type">{eventLabel(config, ev.type)}</span>
-            {ev.modifier && <span className="timeline-modifier">{ev.modifier}</span>}
-            {ev.derivedInputs && (
-              <span className="timeline-derived">
-                {Object.entries(ev.derivedInputs)
-                  .map(([k, v]) => `${k.replace(/_/g, " ")}: ${v}`)
-                  .join(", ")}
-              </span>
-            )}
-          </li>
+          <TimelineRow
+            // Remount on expand/collapse so the edit form re-seeds from the event.
+            key={`${ev.id}${expandedId === ev.id ? ":editing" : ""}`}
+            event={ev}
+            expanded={expandedId === ev.id}
+            onToggle={() => setExpandedId(expandedId === ev.id ? null : ev.id)}
+          />
         ))}
       </ul>
     </div>

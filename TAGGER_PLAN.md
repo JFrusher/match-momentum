@@ -2,7 +2,7 @@
 
 Real-time sport event logging web app in [tagger/](tagger/), exporting JSON compatible with this repo's `momentum.py` pipeline. Full architecture background, rationale, and locked decisions are below; progress/status is at the top so you can pick this up cold.
 
-**Where this stands:** Phases 1 and 2 are done and verified on a Node machine (`npm run build` green: vocab-parity tests → `tsc -b` → `vite build`; all hotkey flows driven end-to-end in a headless browser, including the follow-up modal and derived-input panel).
+**Where this stands: all four phases are done and verified.** `npm run build` green (vocab-parity tests → `tsc -b` → `vite build`), every hotkey/modal/edit/undo/autosave/export flow driven end-to-end in a headless browser, and the full loop closed: a match tagged in the app, exported to `examples/tagger-sample.json`, rendered by `python momentum.py ... --sport rugby` without error. Remaining work is polish/new scope, not the plan.
 
 ---
 
@@ -10,10 +10,10 @@ Real-time sport event logging web app in [tagger/](tagger/), exporting JSON comp
 
 - [x] **Phase 1 — Static skeleton** (verified: type-checks, builds, hotkey loop driven in-browser)
 - [x] **Phase 2 — Config-driven sport rules + follow-up/derived flows**
-- [ ] **Phase 3 — Timeline editing + persistence**
-- [ ] **Phase 4 — Export + validation**
+- [x] **Phase 3 — Timeline editing + persistence**
+- [x] **Phase 4 — Export + validation** (round-trip proven: `examples/tagger-sample.json` renders a correct chart)
 
-### What's actually in the repo right now (post-Phase 2)
+### What's actually in the repo right now (post-Phase 4)
 
 ```
 tagger/
@@ -21,23 +21,31 @@ tagger/
   src/
     main.tsx  App.tsx  App.css
     store/
-      types.ts        # TeamRole, TaggedEvent (+derivedInputs?, followUpOf?)
-      matchStore.ts    # Zustand store: staging state machine + clock + mode (normal|followUp|derivedInput) + sportKey + teamNames
+      types.ts        # TeamRole, TaggedEvent (+derivedInputs?, followUpOf?, points, editedAt?), MatchSnapshot
+      matchStore.ts    # Zustand store (subscribeWithSelector): staging state machine + clock + mode
+                       # (normal|followUp|derivedInput) + sportKey + teamNames + undo stack (10 deep)
+                       # + scoreOverride + edit/delete + resetMatch/hydrate
     sport-config/
       types.ts         # SportConfig schema (EventKind, DerivedInputSpec, FollowUpSpec, ...)
       validate.ts      # hand-rolled validateSportConfig, throws path-prefixed errors at load
       rugby.json  football.json
-      index.ts         # SPORT_CONFIGS (validated at module load), eventLabel() helper
+      index.ts         # SPORT_CONFIGS (validated at module load), eventLabel/vocabPoints/knownVocab helpers
+    export/
+      toMomentumJson.ts # role->name resolution, neutral filter, derivedInputs flattened, weight omitted
+      validate.ts       # validateForExport -> {errors, warnings, info}
+      download.ts       # browser JSON download
     hooks/
-      useHotkeys.ts    # global keydown listener, all hotkey zones, mode routing
+      useHotkeys.ts    # global keydown listener, all hotkey zones, mode routing, Ctrl+Z, [/] score keys
       useSportConfig.ts # active config from store.sportKey
       useClock.ts      # ticking display hook, isolated re-renders
+      useAutosave.ts   # idb-keyval, 500ms debounce, silent rehydrate on mount
     components/
       TeamColumn.tsx  EventColumn.tsx  ModifierColumn.tsx  SubmitBar.tsx
-      ClockController.tsx  SportSelect.tsx
+      ClockController.tsx  SportSelect.tsx  ScoreboardPanel.tsx  NewMatchDialog.tsx
       FollowUpModal.tsx      # Try -> Conversion? — hotkeys 1-9 pick, Escape skips
       DerivedInputPanel.tsx  # phase_sequence numeric fields — Enter submits, Escape cancels whole event
-      TimelineLog/TimelineLog.tsx   # read-only, newest-first (createdAt tiebreak within a rounded minute)
+      ExportPanel.tsx        # team names, validation list, download gate
+      TimelineLog/TimelineLog.tsx  TimelineLog/TimelineRow.tsx  # click-to-edit/delete rows
     utils/
       time.ts          # formatClock(ms) -> "mm:ss"
   tests/
@@ -58,17 +66,31 @@ Phase 2 behavior (all verified in-browser):
 - Phase Sequence opens the derived panel (defaults prefilled, first field autofocused, Enter submits, Escape cancels the whole event; no staged team → warning + Enter no-ops).
 - Sin Bin behaves as a normal modifier-group event (`markerOnly` needs no special UI).
 
+Phase 3 behavior (all verified in-browser):
+- Click any timeline row → inline edit (team/type/modifier/minute selects — type list covers follow-up-only vocabulary too) or delete. Points recompute from the new type; edited rows get an "edited" badge.
+- `Ctrl+Z` undoes the last add/edit/delete (10-deep shallow stack, session-only).
+- Autosave to IndexedDB (idb-keyval, 500ms debounce); silent rehydrate on load — events, score override, team names, sport, and clock position (rehydrated paused) all survive refresh. Saving only starts after hydration, so a boot render can't clobber a saved match.
+- New Match button (mouse-only by design) → confirm dialog → clears match + drops the autosave.
+- Header scoreboard: Σ(points) + override delta; `[`/`{` home −/+, `]`/`}` away −/+.
+
+Phase 4 behavior (verified in-browser and against the real Python pipeline):
+- Export panel: editable home/away team names, live validation (errors block download; warnings/info advisory), JSON download named from the team names.
+- Serialization per the ground-truth contract: neutral events dropped, roles resolved to name strings, `derivedInputs` flattened to exact translator field names, `weight` omitted, `points`/`modifier` kept as harmless extras, sorted by minute.
+- Round-trip proof: `examples/tagger-sample.json` (tagged live in the app, exported via the real download flow) → `python momentum.py examples/tagger-sample.json out.png --sport rugby` renders correctly — score markers, sin-bin ×, phase-sequence momentum humps all where they should be.
+
 Deviations from the plan as written (all deliberate):
 - `translators/rugby_weights.json` gained `"conversion_missed": 0.0` — the plan's follow-up logs it, but the weights table lacked it, so the translator's `_default` would have given a **missed** conversion 0.4 momentum (more than a made conversion's 0.3). 0.0 = no momentum credit; revisit if a miss should count as attacking pressure.
 - `rugby.json` includes a flat `linebreak` entry the plan's example omitted — the weights table has it, and the parity test's reachability rule (correctly) demanded it.
 - `TaggedEvent` gained `derivedInputs?`/`followUpOf?` in Phase 2, not Phase 4 — the modal flows have to record that data when they log; `points`/`editedAt` still deferred as planned.
 - Timeline sorts newest-first with a `createdAt` tiebreak — rapid events share a rounded minute and ties otherwise displayed oldest-first (found by driving the app).
+- Team names are edited in the Export panel (plan never said where "configured team name strings" come from) and are autosaved with the match.
+- The scrub slider and sport dropdown blur themselves after use — a focused control is an "editable target" to the hotkey guard, which otherwise silently swallowed every tagging key until a click-away (found by driving the app).
+- `matplotlib` was missing on this machine and installed via pip (repo has no requirements file — the older charts predate this machine).
 
-Not yet done, deliberately deferred:
-- No inline timeline editing/delete, no undo stack.
-- No autosave/persistence — refreshing the browser loses all state.
-- No export/download, no export validation.
-- No score tracking UI (config `points` values are recorded but unused until Phase 3's ScoreboardPanel).
+Known limitations (fine for v1, noted for later):
+- Undo stack is session-only (not autosaved) and doesn't cover score-override nudges or team-name edits.
+- Switching sport mid-match keeps logged events; export validation flags them if they're not in the new sport's vocabulary.
+- One clock only — no per-half display; halftime is a manual pause + scrub, as designed.
 
 ---
 
@@ -223,8 +245,8 @@ Out of scope for the whole plan: multi-match library, embedded/synced video, mul
 
 - **Phase 1**: tag a burst of events, confirm sub-1-second no-mouse logging and correct clock behavior. *(Done — driven headless via Playwright, see `.claude/skills/verify/SKILL.md` for the recipe.)*
 - **Phase 2**: `npm run check:vocab` passes for both sports; Try triggers the follow-up modal, fully hotkey-navigable; `phase_sequence` triggers the derived-input panel correctly. *(Done — all three verified in-browser, plus Escape/no-team/neutral-team/out-of-range-key probes.)*
-- **Phase 3**: refresh mid-match, confirm autosave rehydrates; edit/delete timeline entries; confirm undo restores the last action.
-- **Phase 4 (end-to-end)**: the `python momentum.py ... --sport rugby` round-trip above — this is the real proof the schema contract holds.
+- **Phase 3**: refresh mid-match, confirm autosave rehydrates; edit/delete timeline entries; confirm undo restores the last action. *(Done — all driven headless, incl. clock-position rehydrate and cleared-match-stays-cleared probes.)*
+- **Phase 4 (end-to-end)**: the `python momentum.py ... --sport rugby` round-trip above — this is the real proof the schema contract holds. *(Done — `examples/tagger-sample.json`, tagged and downloaded through the real UI, renders a correct chart: score lollipops, sin-bin ×, phase-sequence humps.)*
 
 ### Reference files (match-momentum side, read-only — the contract this all targets)
 

@@ -1,0 +1,49 @@
+{
+  "teams": {
+    "home": "Harlequins",
+    "away": "Exeter Chiefs"
+  },
+  "title": "Harlequins vs Exeter Chiefs",
+  "events": [
+    {
+      "minute": 0,
+      "team": "Harlequins",
+      "type": "penalty_kick",
+      "points": 3
+    },
+    {
+      "minute": 0.01,
+      "team": "Harlequins",
+      "type": "try",
+      "points": 5
+    },
+    {
+      "minute": 0.01,
+      "team": "Harlequins",
+      "type": "conversion",
+      "points": 2
+    },
+    {
+      "minute": 0.01,
+      "team": "Harlequins",
+      "type": "phase_sequence",
+      "points": 0,
+      "metres_gained": 40,
+      "end_metres_from_line": 10,
+      "linebreaks": 1
+    },
+    {
+      "minute": 0.01,
+      "team": "Harlequins",
+      "type": "sin_bin",
+      "points": 0,
+      "modifier": "yellow"
+    },
+    {
+      "minute": 0.01,
+      "team": "Exeter Chiefs",
+      "type": "drop_goal",
+      "points": 3
+    }
+  ]
+}

@@ -61,6 +61,29 @@ export function useHotkeys() {
         return;
       }
 
+      // Undo — checked before the single-key zones so Ctrl+Z never stages a team.
+      if ((e.ctrlKey || e.metaKey) && lower === "z") {
+        e.preventDefault();
+        store.undo();
+        return;
+      }
+
+      // Any other chord is a browser shortcut (Ctrl+R, Ctrl+C...) — pass through.
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+      // Score override — [ / Shift+[ home −/+, ] / Shift+] away −/+ (a visible
+      // delta on top of the computed points total, never overwriting it).
+      if (key === "[" || key === "{") {
+        e.preventDefault();
+        store.adjustScoreOverride("home", key === "[" ? -1 : 1);
+        return;
+      }
+      if (key === "]" || key === "}") {
+        e.preventDefault();
+        store.adjustScoreOverride("away", key === "]" ? -1 : 1);
+        return;
+      }
+
       // Clock controls
       if (key === " ") {
         e.preventDefault();

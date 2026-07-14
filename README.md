@@ -61,3 +61,7 @@ python momentum.py examples/events_rugby_demo.json momentum_rugby_demo.png --spo
 ```
 
 Edit an `examples/*.json` file (or point at your own) to chart any match. `events_rugby_demo.json` is hand-written synthetic data exercising the rugby translator's event vocabulary — not calibrated against a real broadcast graphic the way the football examples are.
+
+## Tagger
+
+`tagger/` is a standalone React/TypeScript/Vite app for live, keyboard-only match event logging — a fast three-column (Team → Event → Modifier) interface that exports JSON directly compatible with the pipeline above. It's an independent Node project with no build-time coupling to the Python code, only a shared JSON contract; see `tagger/README.md` for setup and the hotkey reference.

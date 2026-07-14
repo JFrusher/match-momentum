@@ -1,3 +1,5 @@
 .claude/
 __pycache__/
 *.pyc
+tagger/node_modules/
+tagger/dist/

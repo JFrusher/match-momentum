@@ -1,0 +1,167 @@
+:root {
+  color-scheme: dark;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+body {
+  margin: 0;
+  background: #14161a;
+  color: #e8e8e8;
+}
+
+kbd {
+  display: inline-block;
+  min-width: 1.4em;
+  padding: 0.1em 0.4em;
+  border-radius: 4px;
+  background: #2a2d33;
+  border: 1px solid #3f434b;
+  font-size: 0.75em;
+  font-family: inherit;
+  text-align: center;
+}
+
+.app {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 1rem 1.5rem 3rem;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.app-header h1 {
+  font-size: 1.25rem;
+  margin: 0;
+}
+
+.clock-controller {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.clock-display {
+  font-variant-numeric: tabular-nums;
+  font-size: 1.4rem;
+  min-width: 4ch;
+}
+
+.clock-reset-hint {
+  font-size: 0.8em;
+  color: #9a9fa8;
+}
+
+.clock-scrub {
+  width: 160px;
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+}
+
+.column {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  background: #1b1e24;
+  border-radius: 8px;
+  padding: 0.75rem;
+  min-height: 220px;
+}
+
+.column h2 {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #9a9fa8;
+  margin: 0 0 0.25rem;
+}
+
+.column button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  text-align: left;
+  padding: 0.5rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid #2f333b;
+  background: #22252c;
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.95rem;
+}
+
+.column button:hover {
+  border-color: #4c5eff;
+}
+
+.column button.selected {
+  background: #2a3568;
+  border-color: #4c5eff;
+}
+
+.empty-hint {
+  color: #6b7078;
+  font-size: 0.85em;
+  font-style: italic;
+}
+
+.submit-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 1rem;
+  padding: 0.75rem 1rem;
+  background: #1b1e24;
+  border-radius: 8px;
+}
+
+.submit-button {
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  border: none;
+  background: #4c5eff;
+  color: white;
+  cursor: pointer;
+}
+
+.submit-button:disabled {
+  background: #33364a;
+  cursor: not-allowed;
+}
+
+.timeline-log {
+  margin-top: 1.5rem;
+}
+
+.timeline-log ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.timeline-log li {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.4rem 0.6rem;
+  background: #1b1e24;
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+.timeline-minute {
+  font-variant-numeric: tabular-nums;
+  color: #9a9fa8;
+  min-width: 5ch;
+}

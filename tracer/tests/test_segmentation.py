@@ -1,0 +1,105 @@
+"""Synthetic-path fixtures with known ground truth — the project's stop gate.
+
+Paths are built leg by leg at a realistic mousemove rate (60 Hz). Speeds are
+chosen to mimic real-time tracing: a carry tracks a runner (~2-8 m/s), a
+pass is a quick backward/lateral flick, a kick is a fast long sweep.
+PX_PER_M converts the metre-based leg specs into pixel coordinates.
+"""
+
+import math
+
+from tracer import config
+from tracer.continuity import PathPoint
+from tracer.segmentation import segment_path
+
+PX = config.PX_PER_M
+
+
+def leg(points, x0, y0, x1, y1, duration_s, hz=60):
+    """Append a straight leg (metres) from (x0,y0) to (x1,y1) taking duration_s."""
+    t0 = points[-1].t if points else 0.0
+    n = max(2, int(duration_s * hz))
+    start = 0 if points else -1  # skip duplicating the shared corner point
+    for i in range(start + 1, n + 1):
+        f = i / n
+        points.append(PathPoint(
+            (x0 + (x1 - x0) * f) * PX,
+            (y0 + (y1 - y0) * f) * PX,
+            t0 + duration_s * f,
+        ))
+    return points
+
+
+def actions(segments):
+    return [s.action for s in segments]
+
+
+def test_carry_pass_carry_kick():
+    p = []
+    leg(p, 10, 35, 20, 35, 2.5)          # carry: 10m forward at 4 m/s
+    leg(p, 20, 35, 19, 43, 0.45)         # pass: 8m lateral, 1m back, quick flick
+    leg(p, 19, 43, 31, 43, 3.0)          # carry: 12m forward
+    leg(p, 31, 43, 71, 38, 0.5)          # kick: 40m downfield in half a second
+    assert actions(segment_path(p, 1)) == ["CARRY", "PASS", "CARRY", "KICK"]
+
+
+def test_jittery_carry_stays_one_segment():
+    p = []
+    leg(p, 10, 35, 22, 35, 3.0)
+    jittered = [PathPoint(pt.x, pt.y + 2 * PX / 8 * math.sin(2 * math.pi * 6 * pt.t), pt.t)
+                for pt in p]  # ±2px wobble at 6 Hz — hand tremor
+    assert actions(segment_path(jittered, 1)) == ["CARRY"]
+
+
+def test_pure_backward_pass():
+    p = leg([], 40, 35, 33, 36, 0.5)
+    assert actions(segment_path(p, 1)) == ["PASS"]
+
+
+def test_lateral_pass():
+    p = leg([], 40, 35, 41, 45, 0.5)     # 10m lateral, 1m forward
+    assert actions(segment_path(p, 1)) == ["PASS"]
+
+
+def test_fast_burst_is_kick():
+    p = leg([], 30, 35, 65, 35, 0.6)     # 35m in 0.6s
+    assert actions(segment_path(p, 1)) == ["KICK"]
+
+
+def test_slow_forward_is_carry():
+    p = leg([], 30, 35, 45, 35, 4.0)
+    assert actions(segment_path(p, 1)) == ["CARRY"]
+
+
+def test_direction_flips_after_kick():
+    """Receiver runs the ball back: must read CARRY, not PASS."""
+    p = []
+    leg(p, 30, 35, 60, 35, 0.5)          # kick downfield
+    leg(p, 60, 35, 50, 34, 2.5)          # receiver carries back toward kicker
+    assert actions(segment_path(p, 1)) == ["KICK", "CARRY"]
+
+
+def test_attack_dir_mirrored():
+    p = []
+    leg(p, 90, 35, 80, 35, 2.5)          # carry toward -x
+    leg(p, 80, 35, 81, 43, 0.45)         # backward-lateral pass
+    leg(p, 81, 43, 69, 43, 3.0)          # carry
+    assert actions(segment_path(p, -1)) == ["CARRY", "PASS", "CARRY"]
+
+
+def test_speed_change_same_heading_splits_but_stays_carryish():
+    """Accel without a turn may split the segment; must never invent a PASS."""
+    p = []
+    leg(p, 10, 35, 16, 35, 2.0)          # 3 m/s
+    leg(p, 16, 35, 40, 35, 2.0)          # 12 m/s burst, same heading, too long for kick
+    result = actions(segment_path(p, 1))
+    assert "PASS" not in result and "KICK" not in result
+
+
+def test_accidental_click_ignored():
+    p = leg([], 30, 35, 30.5, 35, 0.2)   # 4px twitch
+    assert segment_path(p, 1) == []
+
+
+def test_too_few_points_ignored():
+    assert segment_path([PathPoint(0, 0, 0.0), PathPoint(9, 0, 0.1)], 1) == []

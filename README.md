@@ -55,13 +55,19 @@ To add a new data provider (Opta, StatsBomb, ...): implement `BaseDataSource` in
 ## Run it
 
 ```bash
-pip install numpy matplotlib scipy
+pip install -e .
 python momentum.py examples/events_arg_egy.json momentum_arg_egy.png
 python momentum.py examples/events_rugby_demo.json momentum_rugby_demo.png --sport rugby
 ```
 
 Edit an `examples/*.json` file (or point at your own) to chart any match. `events_rugby_demo.json` is hand-written synthetic data exercising the rugby translator's event vocabulary — not calibrated against a real broadcast graphic the way the football examples are.
 
-## Tagger
+## Tracer (live tagging)
 
-`tagger/` is a standalone React/TypeScript/Vite app for live, keyboard-only match event logging — a fast three-column (Team → Event → Modifier) interface that exports JSON directly compatible with the pipeline above. It's an independent Node project with no build-time coupling to the Python code, only a shared JSON contract; see `tagger/README.md` for setup and the hotkey reference.
+`tracer/` is a NiceGUI app for logging a rugby match live by **tracing the ball's path with the mouse**: one continuous drag per possession chain, auto-segmented into carries/passes/kicks by geometry, with keyboard taps layering on player numbers, linebreaks, and score events. Traced distance and territory feed the momentum weights directly instead of typed estimates. It validates every export by running the real `RugbySport` translator in-process; `examples/tracer-sample.json` is its round-trip proof artifact. See `tracer/README.md` for the mechanic, hotkeys, and tuning.
+
+```bash
+python -m tracer.app
+```
+
+The previous tagging tool — a React/TypeScript keyboard-only event logger — is archived unchanged in `legacy/tagger/` (see its README; `TAGGER_PLAN.md` documents its build history).

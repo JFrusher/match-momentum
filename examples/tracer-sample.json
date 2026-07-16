@@ -1,0 +1,187 @@
+{
+ "teams": {
+  "home": "ENG",
+  "away": "WAL"
+ },
+ "title": "MATCH MOMENTUM  \u2014  ENG vs WAL",
+ "footer": "Traced live with tracer/",
+ "events": [
+  {
+   "type": "phase_sequence",
+   "team": "ENG",
+   "minute": 3.0,
+   "metres_gained": 25.0,
+   "end_metres_from_line": 65.0,
+   "linebreaks": 0,
+   "players": [
+    {
+     "number": 9,
+     "role": "start"
+    }
+   ]
+  },
+  {
+   "type": "penalty_kick",
+   "team": "WAL",
+   "minute": 7.0
+  },
+  {
+   "type": "phase_sequence",
+   "team": "ENG",
+   "minute": 12.0,
+   "metres_gained": 52.0,
+   "end_metres_from_line": 8.0,
+   "linebreaks": 1,
+   "players": [
+    {
+     "number": 9,
+     "role": "start"
+    },
+    {
+     "number": 14,
+     "role": "start"
+    }
+   ]
+  },
+  {
+   "type": "try",
+   "team": "ENG",
+   "minute": 12.4,
+   "label": "ENG try 12'"
+  },
+  {
+   "type": "conversion",
+   "team": "ENG",
+   "minute": 12.9
+  },
+  {
+   "type": "turnover_won",
+   "team": "WAL",
+   "minute": 22.0
+  },
+  {
+   "type": "phase_sequence",
+   "team": "WAL",
+   "minute": 25.0,
+   "metres_gained": 30.0,
+   "end_metres_from_line": 15.0,
+   "linebreaks": 0
+  },
+  {
+   "type": "penalty_kick",
+   "team": "WAL",
+   "minute": 28.0
+  },
+  {
+   "type": "sin_bin",
+   "team": "ENG",
+   "minute": 34.0,
+   "label": "ENG yellow 34'"
+  },
+  {
+   "type": "phase_sequence",
+   "team": "WAL",
+   "minute": 37.0,
+   "metres_gained": 38.0,
+   "end_metres_from_line": 5.0,
+   "linebreaks": 1
+  },
+  {
+   "type": "try",
+   "team": "WAL",
+   "minute": 39.0,
+   "label": "WAL try 39'"
+  },
+  {
+   "type": "conversion",
+   "team": "WAL",
+   "minute": 40.0
+  },
+  {
+   "type": "phase_sequence",
+   "team": "ENG",
+   "minute": 48.0,
+   "metres_gained": 20.0,
+   "end_metres_from_line": 40.0,
+   "linebreaks": 0,
+   "players": [
+    {
+     "number": 10,
+     "role": "start"
+    }
+   ]
+  },
+  {
+   "type": "drop_goal",
+   "team": "ENG",
+   "minute": 55.0
+  },
+  {
+   "type": "phase_sequence",
+   "team": "WAL",
+   "minute": 61.0,
+   "metres_gained": 42.0,
+   "end_metres_from_line": 10.0,
+   "linebreaks": 1
+  },
+  {
+   "type": "penalty_kick",
+   "team": "WAL",
+   "minute": 64.0
+  },
+  {
+   "type": "phase_sequence",
+   "team": "ENG",
+   "minute": 67.0,
+   "metres_gained": 50.0,
+   "end_metres_from_line": 20.0,
+   "linebreaks": 0
+  },
+  {
+   "type": "phase_sequence",
+   "team": "ENG",
+   "minute": 70.0,
+   "metres_gained": 50.0,
+   "end_metres_from_line": 3.0,
+   "linebreaks": 2,
+   "players": [
+    {
+     "number": 8,
+     "role": "start"
+    }
+   ]
+  },
+  {
+   "type": "try",
+   "team": "ENG",
+   "minute": 72.0,
+   "label": "ENG try 72'"
+  },
+  {
+   "type": "conversion",
+   "team": "ENG",
+   "minute": 73.0
+  },
+  {
+   "type": "phase_sequence",
+   "team": "WAL",
+   "minute": 78.0,
+   "metres_gained": 18.9,
+   "end_metres_from_line": 31.1,
+   "linebreaks": 0
+  },
+  {
+   "type": "phase_sequence",
+   "team": "ENG",
+   "minute": 78.1,
+   "metres_gained": 8.9,
+   "end_metres_from_line": 60.0,
+   "linebreaks": 0
+  },
+  {
+   "type": "turnover_won",
+   "team": "ENG",
+   "minute": 78.1
+  }
+ ]
+}

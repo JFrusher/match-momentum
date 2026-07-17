@@ -11,6 +11,7 @@ keyboard taps layer on annotations, and the result exports as the same JSON
 ```
 pip install -e .[dev]          # once, from repo root
 python -m tracer.app           # browser tab; native window if pywebview installed
+python -m tracer.app 8123      # optional port (default 8080)
 ```
 
 ## The mechanic

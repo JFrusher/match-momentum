@@ -7,6 +7,7 @@ silently drops in-memory match state.
 """
 
 import importlib.util
+import sys
 import time
 
 from nicegui import ui
@@ -81,8 +82,11 @@ def index():
 
         m.on_commit = lambda chain: canvas.render_segments(chain.segments)
         m.on_change = lambda: (save_now(), refresh())
-        ui.timer(0.5, refresh)
-        ui.timer(5.0, save_now)  # plus save-on-commit via on_change
+        # timers must attach to a live slot: begin() runs inside the setup
+        # form's click handler, whose slot root.clear() just deleted
+        with root:
+            ui.timer(0.5, refresh)
+            ui.timer(5.0, save_now)  # plus save-on-commit via on_change
         refresh()
 
     def begin(match):
@@ -92,6 +96,7 @@ def index():
 
 
 if __name__ in {"__main__", "__mp_main__"}:
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else 8080
     native = importlib.util.find_spec("webview") is not None
-    ui.run(title="Live Trace", reload=False, native=native,
+    ui.run(title="Live Trace", port=port, reload=False, native=native,
            window_size=(1200, 820) if native else None)

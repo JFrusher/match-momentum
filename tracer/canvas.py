@@ -37,7 +37,7 @@ class TraceCanvas:
             on_mouse=self._mouse,
             events=["mousedown", "mousemove", "mouseup"],
             cross=True,
-        )
+        ).style(f"width:{IMAGE_W}px;max-width:100%")  # size= sets only aspect-ratio, not CSS width
 
     def _mouse(self, e):
         t = time.monotonic()

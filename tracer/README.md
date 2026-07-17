@@ -52,12 +52,43 @@ Every committed chain (and every 5s) writes `tracer/sessions/session.json`
 atomically; relaunching offers to resume, clock paused. A crash loses at
 most the one in-progress trace.
 
+## Dev mode (segment introspection, replay, trace capture)
+
+```
+python -m tracer.app 8080 dev      # or open http://localhost:8080/?dev=1
+```
+
+A right drawer logs one report per chain — **including rejected ones** (the
+"why did my trace disappear" case): path stats (points, duration, Hz, net
+px), every boundary candidate with angle/speed-ratio/strength and whether it
+was picked or why it was dropped, per-segment classification evidence (fwd/
+lat px, duration, speed, the exact rule that fired, `CARRY->KICK (hint)` when
+a tap relabelled it), and every tap-correlation decision. The canvas draws a
+white dot at each picked boundary.
+
+- **Replay** injects any `tracer/fixtures.py` scenario (or a saved trace)
+  through the real pipeline — same canvas redraw, same report. Start the
+  clock first or minute stamps read ~0.
+- **Save last trace** snapshots the last chain's raw inputs to
+  `tracer/dev_traces/` (gitignored). Replaying the file must reproduce the
+  identical report — the pipeline is deterministic on identical points.
+- **Promote a trace to a regression**: move the file to
+  `tracer/tests/traces/`, add an `"expect"` key (vocabulary in
+  `fixtures.check`), and `tracer/tests/test_corpus.py` picks it up as
+  `trace:<name>` automatically.
+
 ## Tuning
 
 All segmentation thresholds live in `tracer/config.py` with comments. If
 real-world traces misclassify, tune there and check against
 `tracer/tests/test_segmentation.py`, which encodes the expected behavior on
 synthetic paths with known ground truth.
+
+The wider loop: save the misbehaving trace in dev mode → promote it with the
+expected truth → `python -m tracer.sweep` grid-sweeps the thresholds over
+the whole corpus (39 synthetic scenarios + promoted real traces) and reports
+which combination fixes it without breaking anything else. The sweep never
+writes `config.py` — read the table, decide, edit by hand.
 
 ## Manual test recipe (browser half; the pure logic is pytest-covered)
 

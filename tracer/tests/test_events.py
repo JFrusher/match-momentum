@@ -105,6 +105,11 @@ def test_match_state_full_flow_trace_plus_taps():
     assert ev["players"] == [{"number": 9, "role": "start"}]
     (std,) = RugbySport().translate([ev])
     assert std.weight == 0.37
+    # evidence capture: raw inputs + segmentation debug snapshot per chain
+    assert m.chain_seq == 1
+    assert m.last_chain is not None
+    assert len(m.last_raw["points"]) == 151
+    assert m.last_debug["segments"]
 
 
 def test_discrete_events_and_conversion_window():

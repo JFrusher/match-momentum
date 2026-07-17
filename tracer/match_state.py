@@ -7,7 +7,7 @@ app.py wires UI events in and reads state back; optional callbacks
 import time
 from typing import Optional
 
-from . import config
+from . import config, segmentation
 from .continuity import ChainRecorder, PlayChain, new_chain_id
 from .events import assign_teams, chain_to_events
 from .geometry import PitchCalibration
@@ -65,6 +65,11 @@ class MatchState:
         self._pending_try = None  # (team_key, deadline_monotonic)
         self.on_commit = None     # callback(chain) after a chain is committed
         self.on_change = None     # callback() after any state change
+        # dev-panel evidence: last end_chain attempt, accepted or rejected
+        self.chain_seq = 0
+        self.last_debug: dict = {}
+        self.last_raw: Optional[dict] = None
+        self.last_chain: Optional[PlayChain] = None
 
     # --- mouse -----------------------------------------------------------
     def mouse_down(self, x, y, t):
@@ -104,10 +109,18 @@ class MatchState:
         taps = list(self.keystate.taps)
         intervals = self.keystate.intervals_until(t)
         self.keystate.clear_chain()
+        self.chain_seq += 1
+        self.last_raw = {"points": [[p.x, p.y, p.t] for p in points],
+                         "taps": [[tp.key, tp.t] for tp in taps],
+                         "shift": [list(iv) for iv in intervals],
+                         "possession": self.possession,
+                         "attack_dir_home": self.attack_dir_home}
         attack_dir = (self.attack_dir_home if self.possession == "home"
                       else -self.attack_dir_home)
         segments = segment_path(points, attack_dir)
+        self.last_debug = segmentation.last_debug  # by ref; apply_taps appends
         if not segments:
+            self.last_chain = None
             return None
         apply_taps(segments, taps, intervals)
         chain = PlayChain(
@@ -117,6 +130,7 @@ class MatchState:
             if self._chain_start_minute is not None else self.clock.minute(t),
             segments=segments,
         )
+        self.last_chain = chain
         self.possession = assign_teams(segments, chain.team)
         self.events.extend(chain_to_events(
             chain, self.team_names, self.attack_dir_home, self.cal))

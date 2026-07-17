@@ -14,15 +14,17 @@ from nicegui import ui
 
 from . import autosave
 from .canvas import TraceCanvas
+from .devpanel import build_dev_panel
 from .export import export_json
 from .review import open_review
 from .setup import setup_form
 
 DIR_ARROWS = {1: "→", -1: "←"}
+DEV_CLI = "dev" in sys.argv[1:]  # for the native window, where ?dev=1 is unreachable
 
 
 @ui.page("/")
-def index():
+def index(dev: bool = False):  # ?dev=1 enables the dev drawer
     # per-connection state, built inside the page closure: module-level state
     # would let two tabs / a reload corrupt each other's match
     ctx = {"match": None}
@@ -88,6 +90,8 @@ def index():
             ui.timer(0.5, refresh)
             ui.timer(5.0, save_now)  # plus save-on-commit via on_change
         refresh()
+        if dev or DEV_CLI:
+            build_dev_panel(m)
 
     def begin(match):
         build_match_ui(match)
@@ -96,7 +100,7 @@ def index():
 
 
 if __name__ in {"__main__", "__mp_main__"}:
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else 8080
+    port = next((int(a) for a in sys.argv[1:] if a.isdigit()), 8080)
     native = importlib.util.find_spec("webview") is not None
     ui.run(title="Live Trace", port=port, reload=False, native=native,
            window_size=(1200, 820) if native else None)

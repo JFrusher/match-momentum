@@ -8,9 +8,10 @@ PX_PER_M converts the metre-based leg specs into pixel coordinates.
 
 import math
 
-from tracer import config
+from tracer import config, segmentation
 from tracer.continuity import PathPoint
-from tracer.segmentation import segment_path
+from tracer.keystate import TapEvent
+from tracer.segmentation import apply_taps, segment_path
 
 PX = config.PX_PER_M
 
@@ -103,3 +104,36 @@ def test_accidental_click_ignored():
 
 def test_too_few_points_ignored():
     assert segment_path([PathPoint(0, 0, 0.0), PathPoint(9, 0, 0.1)], 1) == []
+
+
+def test_last_debug_populated():
+    p = []
+    leg(p, 10, 35, 20, 35, 2.5)
+    leg(p, 20, 35, 19, 43, 0.45)
+    leg(p, 19, 43, 31, 43, 3.0)
+    leg(p, 31, 43, 71, 38, 0.5)
+    segs = segment_path(p, 1)
+    d = segmentation.last_debug
+    assert d["rejected"] is None
+    assert d["n_points"] == len(p)
+    assert 55 <= d["hz"] <= 65
+    assert d["candidates"]
+    assert len(d["picked"]) == len(segs) - 1
+    assert len(d["segments"]) == len(segs)
+    assert all(s["rule"] for s in d["segments"])
+    assert d["segments"][0]["action_geo"] == "CARRY"
+
+
+def test_last_debug_rejection_reason():
+    segment_path([PathPoint(0, 0, 0.0), PathPoint(9, 0, 0.1)], 1)
+    assert "too few points" in segmentation.last_debug["rejected"]
+    segment_path(leg([], 30, 35, 30.5, 35, 0.2), 1)  # 4px twitch
+    assert "net movement" in segmentation.last_debug["rejected"]
+
+
+def test_apply_taps_logged():
+    segs = segment_path(leg([], 10, 35, 22, 35, 3.0), 1)
+    apply_taps(segs, [TapEvent("9", 0.15), TapEvent("k", 1.0)], [])
+    log = segmentation.last_debug["taps"]
+    assert any("'k' hint" in line for line in log)
+    assert any("digit" in line for line in log)

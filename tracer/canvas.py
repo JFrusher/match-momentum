@@ -61,6 +61,10 @@ class TraceCanvas:
             color = ACTION_COLORS.get(seg.action, "white")
             parts.append(_polyline([(p.x, p.y) for p in seg.points], color,
                                    width=4, dash="dash" if seg.intercepted else ""))
+        for seg in segments[:-1]:  # white dot at each picked boundary joint
+            p = seg.points[-1]
+            parts.append(f'<circle cx="{p.x:.1f}" cy="{p.y:.1f}" r="4" '
+                         f'fill="white" stroke="#333" stroke-width="1.5" />')
         self._overlay = "".join(parts)
         self._live = []
         self._redraw()

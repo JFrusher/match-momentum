@@ -4,5 +4,6 @@ __pycache__/
 .venv/
 *.egg-info/
 tracer/sessions/
+tracer/dev_traces/
 legacy/tagger/node_modules/
 legacy/tagger/dist/

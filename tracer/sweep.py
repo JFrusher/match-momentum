@@ -13,8 +13,8 @@ import itertools
 from . import config, fixtures
 
 GRID = {
-    "ANGLE_THRESHOLD_DEG": [45, 55, 65],
-    "SPEED_RATIO_THRESHOLD": [2.0, 2.5, 3.0],
+    "BOUNDARY_ACCEPT": [0.65, 0.75, 0.85],
+    "W_PASS_LATERAL": [6.0, 7.0, 8.0],
     "MIN_SEGMENT_MS": [250, 350, 450],
 }
 
@@ -42,7 +42,7 @@ def main():
 
     rows.sort(key=lambda r: -r[0])
     for passed, total, combo, failed in rows:
-        label = " ".join(f"{k.split('_')[0]}={v}" for k, v in zip(keys, combo))
+        label = " ".join(f"{k}={v}" for k, v in zip(keys, combo))
         mark = "  (baseline)" if combo == baseline else ""
         tail = ""
         if failed:

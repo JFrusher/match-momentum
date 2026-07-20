@@ -99,8 +99,8 @@ def _sc(name, **kw):
 
 # --- corpus ----------------------------------------------------------------
 # Realistic tracing speeds: carry 2-8 m/s, pass a 0.45-0.6s flick, kick
-# 35-40m in ~0.5s. Legs >= 0.45s (> MIN_SEGMENT_MS); corner angles clear of
-# ANGLE_THRESHOLD_DEG on the intended side.
+# 35-40m in ~0.5s. Legs >= 0.45s (> MIN_SEGMENT_MS); corner angles score
+# clear of BOUNDARY_ACCEPT on the intended side.
 CS = dict(waypoints=((10, 35), (22, 35)), durations=(3.0,))       # 1-seg carry
 CPC = dict(waypoints=((10, 35), (20, 35), (19, 43), (31, 43)),    # boundary
            durations=(2.5, 0.45, 3.0))                            # ~2.5s, ~2.95s

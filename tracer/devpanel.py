@@ -17,6 +17,25 @@ from . import autosave, fixtures
 MAX_CANDIDATE_LINES = 15
 
 
+def _score_table(ev: dict) -> list[str]:
+    """Per-feature contribution rows: squashed value x weight per scored class."""
+    from . import features
+    out = [f"     {'feature':<10}{'sq':>7}"
+           + "".join(f"{'w' + c[0]:>7}{'->' + c[0]:>8}" for c in features.SCORED_CLASSES)]
+    for f in features.FEATURES:
+        sq = ev["features"][f]
+        row = f"     {f:<10}{sq:>7.3f}"
+        for cls in features.SCORED_CLASSES:
+            _, weights = features.class_weights(cls)
+            row += f"{weights[f]:>7.1f}{weights[f] * sq:>+8.2f}"
+        out.append(row)
+    scores, probs = ev["scores"], ev["probs"]
+    out.append("     scores " + " ".join(f"{c[0]}={scores[c]:+.2f}" for c in scores)
+               + " | probs " + " ".join(f"{c[0]}={probs[c]:.2f}" for c in probs)
+               + f" | conf {ev['confidence']:.2f}")
+    return out
+
+
 def format_report(debug: dict, chain) -> str:
     """Monospace block of everything the recognizer decided and why."""
     d = debug
@@ -41,10 +60,20 @@ def format_report(debug: dict, chain) -> str:
                      f" fwd {ev['forward_px']:+7.1f}px lat {ev['lateral_px']:+7.1f}px"
                      f" {ev['duration_s']:.2f}s {ev['speed_mps']:.1f}m/s"
                      f" {ev['n_points']}pts atk{arrow}")
+        if "features" in ev:
+            lines += _score_table(ev)
 
     cands, picked = d.get("candidates", []), d.get("picked", [])
     picked_i = {p["i"] for p in picked}
     lines.append(f"boundaries: {len(cands)} candidates -> {len(picked)} picked")
+    b = d.get("boundary")
+    if b:
+        lines.append(f"  baseline: angle {b['angle_base']:.1f}deg (med {b['med_angle']:.1f})"
+                     f" ratio {b['ratio_base']:.2f} (med {b['med_ratio']:.2f})"
+                     f" accept>={b['accept']:.2f}")
+        for n in b.get("near_misses", []):
+            lines.append(f"  near-miss i={n['i']} score={n['score']:.2f}"
+                         f" angle={n['angle']:.1f} ratio={n['ratio']:.2f}")
     for c in cands[:MAX_CANDIDATE_LINES]:
         mark = "picked" if c["i"] in picked_i else "candidate"
         lines.append(f"  i={c['i']} @{c['t']:.2f}s angle={c['angle']:.1f}"

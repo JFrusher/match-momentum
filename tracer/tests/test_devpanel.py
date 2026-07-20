@@ -29,3 +29,17 @@ def test_format_report_shows_hint_relabel():
     m = _run("hint_k")
     r = format_report(m.last_debug, m.last_chain)
     assert "CARRY->KICK (hint)" in r
+
+
+def test_format_report_shows_score_table():
+    m = _run("carry_pass_carry")
+    r = format_report(m.last_debug, m.last_chain)
+    for feat in ("backward", "lateral", "kickburst", "straight"):
+        assert feat in r
+    assert "probs" in r and "conf" in r
+
+
+def test_format_report_shows_boundary_baselines():
+    m = _run("carry_straight")
+    r = format_report(m.last_debug, m.last_chain)
+    assert "baseline:" in r and "accept>=" in r

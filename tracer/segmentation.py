@@ -17,7 +17,7 @@ corrected by an R type-hint tap or in review.
 
 import math
 
-from . import config
+from . import config, features
 from .continuity import PathPoint, PlayerTag, Segment
 
 # Evidence from the most recent segment_path() + apply_taps() call, for the
@@ -62,8 +62,14 @@ def _angle_deg(a, b) -> float:
 
 
 def _boundary_candidates(points):
-    """(index, strength, angle, ratio) where heading or speed changes sharply."""
-    out = []
+    """(candidates, info): per-point evidence scores vs path-adaptive baselines.
+
+    candidates: (index, score, angle, ratio) tuples where the combined
+    heading/speed-change evidence clears BOUNDARY_ACCEPT. Baselines are this
+    path's own medians (floored), so a wobbly hand raises the bar and either
+    evidence alone can still clear the accept threshold.
+    """
+    measured = []
     for i in range(1, len(points) - 1):
         before = _mean_velocity(points, i, -1)
         after = _mean_velocity(points, i, +1)
@@ -74,10 +80,32 @@ def _boundary_candidates(points):
             continue  # stationary hover, heading is noise
         angle = _angle_deg(before, after)
         ratio = max(speed_b, speed_a) / max(min(speed_b, speed_a), 1e-6)
-        if angle > config.ANGLE_THRESHOLD_DEG or ratio > config.SPEED_RATIO_THRESHOLD:
-            out.append((i, angle / config.ANGLE_THRESHOLD_DEG
-                        + ratio / config.SPEED_RATIO_THRESHOLD, angle, ratio))
-    return out
+        measured.append((i, angle, ratio))
+    if not measured:
+        return [], {}
+    med_angle = sorted(a for _, a, _ in measured)[len(measured) // 2]
+    med_ratio = sorted(r for _, _, r in measured)[len(measured) // 2]
+    angle_base = (max(config.BOUNDARY_ANGLE_FLOOR_DEG, med_angle)
+                  * config.BOUNDARY_ANGLE_BASE_MULT)
+    ratio_base = (max(config.BOUNDARY_RATIO_FLOOR, med_ratio)
+                  * config.BOUNDARY_RATIO_BASE_MULT)
+    accepted, near = [], []
+    for i, angle, ratio in measured:
+        score = (config.W_BOUNDARY_ANGLE * math.tanh(
+                     max(0.0, angle - angle_base) / config.BOUNDARY_ANGLE_SCALE_DEG)
+                 + config.W_BOUNDARY_SPEED * math.tanh(
+                     max(0.0, ratio - ratio_base) / config.BOUNDARY_RATIO_SCALE))
+        if score >= config.BOUNDARY_ACCEPT:
+            accepted.append((i, score, angle, ratio))
+        elif score > 0:
+            near.append((score, i, angle, ratio))
+    info = {"med_angle": round(med_angle, 1), "med_ratio": round(med_ratio, 2),
+            "angle_base": round(angle_base, 1), "ratio_base": round(ratio_base, 2),
+            "accept": config.BOUNDARY_ACCEPT,
+            "near_misses": [{"i": i, "score": round(s, 2), "angle": round(a, 1),
+                             "ratio": round(r, 2)}
+                            for s, i, a, r in sorted(near, reverse=True)[:3]]}
+    return accepted, info
 
 
 def _pick_boundaries(points, candidates, notes):
@@ -128,26 +156,27 @@ def _pick_boundaries(points, candidates, notes):
 
 
 def _classify(points: list[PathPoint], attack_dir: int) -> tuple:
-    """(action, evidence dict) — evidence names the rule that fired and why."""
-    start, end = points[0], points[-1]
-    forward = attack_dir * (end.x - start.x)
-    lateral = end.y - start.y
-    duration = end.t - start.t
-    speed_mps = (math.hypot(end.x - start.x, lateral) / duration / config.PX_PER_M
-                 if duration > 0 else 0.0)
-    if forward < 0:
-        action, rule = "PASS", "backward"
-    elif abs(lateral) > abs(forward) * config.LATERAL_RATIO:
-        action, rule = "PASS", f"lateral>{config.LATERAL_RATIO}x forward"
-    elif speed_mps > config.FAST_SPEED_MPS and duration * 1000 < config.SHORT_DURATION_MS:
-        action, rule = "KICK", "kick: fast+short"
+    """(action, evidence dict) — per-class weighted feature scores, argmax wins."""
+    feats, raw = features.extract(points, attack_dir)
+    scores, probs, action, confidence = features.score(feats)
+    if action == "CARRY":
+        rule = f"carry (default, margin {confidence:.2f})"
     else:
-        action, rule = "CARRY", "carry (default)"
+        _, weights = features.class_weights(action)
+        top = max(features.FEATURES, key=lambda f: weights[f] * feats[f])
+        rule = (f"{action.lower()}: {top} {weights[top] * feats[top]:+.1f}"
+                f" (p={probs[action]:.2f})")
     return action, {
         "action_geo": action, "rule": rule,
-        "forward_px": round(forward, 1), "lateral_px": round(lateral, 1),
-        "duration_s": round(duration, 3), "speed_mps": round(speed_mps, 2),
+        "forward_px": round(raw["fwd_m"] * config.PX_PER_M, 1),
+        "lateral_px": round(raw["lat_m"] * config.PX_PER_M, 1),
+        "duration_s": raw["dur_s"], "speed_mps": raw["speed_net"],
         "n_points": len(points), "attack_dir": attack_dir,
+        "features": {f: round(feats[f], 3) for f in features.FEATURES},
+        "raw": raw,
+        "scores": {c: round(s, 2) for c, s in scores.items()},
+        "probs": {c: round(p, 3) for c, p in probs.items()},
+        "confidence": round(confidence, 3),
     }
 
 
@@ -243,7 +272,8 @@ def apply_taps(segments: list[Segment], taps, shift_intervals) -> list[Segment]:
 def segment_path(points: list[PathPoint], attack_dir: int) -> list[Segment]:
     """Split one traced path into classified Segments. attack_dir: +1 = +x, -1 = -x."""
     global last_debug
-    last_debug = d = {"rejected": None}
+    d: dict = {"rejected": None}
+    last_debug = d
     if len(points) < 3:
         d["rejected"] = f"too few points ({len(points)} < 3)"
         return []
@@ -256,14 +286,16 @@ def segment_path(points: list[PathPoint], attack_dir: int) -> list[Segment]:
         d["rejected"] = f"net movement {net_px:.1f}px < {config.MIN_MOVEMENT_PX}px"
         return []
     smoothed = _smooth(points)
-    candidates = _boundary_candidates(smoothed)
+    candidates, boundary_info = _boundary_candidates(smoothed)
     notes: list[str] = []
     boundaries = _pick_boundaries(smoothed, candidates, notes)
     t0 = points[0].t
+    d["boundary"] = boundary_info
     d["candidates"] = [{"i": i, "t": smoothed[i].t - t0, "x": round(smoothed[i].x, 1),
                         "y": round(smoothed[i].y, 1), "angle": round(angle, 1),
-                        "ratio": round(ratio, 2), "strength": round(strength, 2)}
-                       for i, strength, angle, ratio in candidates]
+                        "ratio": round(ratio, 2), "strength": round(score, 2),
+                        "score": round(score, 2)}
+                       for i, score, angle, ratio in candidates]
     d["picked"] = [{"i": b, "t": smoothed[b].t - t0, "x": round(smoothed[b].x, 1),
                     "y": round(smoothed[b].y, 1)} for b in boundaries]
     d["boundary_notes"] = notes
@@ -279,7 +311,9 @@ def segment_path(points: list[PathPoint], attack_dir: int) -> list[Segment]:
     for sl in slices:
         action, evidence = _classify(sl, direction)
         d["segments"].append(evidence)
-        segments.append(Segment(action=action, points=sl))
+        segments.append(Segment(action=action, points=sl,
+                                scores=evidence["scores"],
+                                confidence=evidence["confidence"]))
         if action == "KICK":
             direction = -direction  # receiver attacks the other way
     return segments

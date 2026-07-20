@@ -27,6 +27,8 @@ class Segment:
     intercepted: bool = False
     linebreak: bool = False
     players: list = field(default_factory=list)  # list[PlayerTag]
+    scores: dict = field(default_factory=dict)   # {class: linear score}, CARRY = 0
+    confidence: float | None = None              # top prob minus second prob
 
     @property
     def start_t(self) -> float:

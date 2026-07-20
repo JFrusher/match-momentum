@@ -60,11 +60,12 @@ python -m tracer.app 8080 dev      # or open http://localhost:8080/?dev=1
 
 A right drawer logs one report per chain — **including rejected ones** (the
 "why did my trace disappear" case): path stats (points, duration, Hz, net
-px), every boundary candidate with angle/speed-ratio/strength and whether it
-was picked or why it was dropped, per-segment classification evidence (fwd/
-lat px, duration, speed, the exact rule that fired, `CARRY->KICK (hint)` when
-a tap relabelled it), and every tap-correlation decision. The canvas draws a
-white dot at each picked boundary.
+px), the boundary baselines plus every candidate's evidence score (and the
+top near-miss rejects — what a missed turn actually scored), a per-segment
+score table (each feature's value, weight, and contribution per class, final
+probabilities, confidence margin, `CARRY->KICK (hint)` when a tap relabelled
+it), and every tap-correlation decision. The canvas draws a white dot at
+each picked boundary.
 
 - **Replay** injects any `tracer/fixtures.py` scenario (or a saved trace)
   through the real pipeline — same canvas redraw, same report. Start the
@@ -79,16 +80,19 @@ white dot at each picked boundary.
 
 ## Tuning
 
-All segmentation thresholds live in `tracer/config.py` with comments. If
-real-world traces misclassify, tune there and check against
-`tracer/tests/test_segmentation.py`, which encodes the expected behavior on
-synthetic paths with known ground truth.
+Full workflow with a symptom→parameter diagnosis table: **[TUNING.md](TUNING.md)**.
 
-The wider loop: save the misbehaving trace in dev mode → promote it with the
-expected truth → `python -m tracer.sweep` grid-sweeps the thresholds over
-the whole corpus (39 synthetic scenarios + promoted real traces) and reports
-which combination fixes it without breaking anything else. The sweep never
-writes `config.py` — read the table, decide, edit by hand.
+Both recognizer layers are evidence-scored: boundary detection scores
+heading/speed changes against the path's own baselines; classification is a
+per-class weighted feature sum (softmax, CARRY the default reference class).
+Every weight, scale, and threshold is a flat constant in `tracer/config.py`.
+
+The loop: save the misbehaving trace in dev mode → promote it with the
+expected truth → `python -m tracer.sweep` grid-sweeps any constants over the
+whole corpus (39 synthetic scenarios + promoted real traces), and
+`python -m tracer.fit` proposes classification weights by softmax regression
+over the same corpus. Neither ever writes `config.py` — read the output,
+decide, edit by hand.
 
 ## Manual test recipe (browser half; the pure logic is pytest-covered)
 

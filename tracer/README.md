@@ -25,9 +25,10 @@ python -m tracer.app 8123      # optional port (default 8080)
 3. The raw white line redraws color-coded by inferred action:
    amber carry · blue pass · red kick (dashed = intercepted).
 
-**Assumption**: you trace in rough real-time sync with the play (live or
-real-time-paced replay). Kick-vs-carry classification reads tracing speed;
-leisurely after-the-fact reconstruction breaks that signal.
+Trace at whatever pace suits you — live, real-time replay, or a quick
+after-the-fact sketch. The line is read from its **geometry** (shape,
+distances, turns), not its drawing speed, so the same trace classifies
+identically however fast you draw it.
 
 ## Keys (tap any time during the trace; timing correlates them)
 

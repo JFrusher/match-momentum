@@ -14,8 +14,8 @@ from . import config, fixtures
 
 GRID = {
     "BOUNDARY_ACCEPT": [0.65, 0.75, 0.85],
-    "W_PASS_LATERAL": [6.0, 7.0, 8.0],
-    "MIN_SEGMENT_MS": [250, 350, 450],
+    "MIN_SEGMENT_M": [3.0, 4.0, 5.0],
+    "B_KICK": [-7.0, -6.4, -5.5],
 }
 
 

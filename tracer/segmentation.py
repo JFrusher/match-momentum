@@ -6,7 +6,8 @@ CARRY/PASS/KICK:
 
   - PASS: net displacement backward or predominantly lateral — a forward
     pass is illegal in rugby, so this is the one reliable signal.
-  - KICK: fast, short traced burst (assumes rough real-time tracing).
+  - KICK: long, straight stroke, optionally flicked faster than the trace's
+    own pace. Read from geometry — no assumption about tracing speed.
   - CARRY: everything else (the deliberate default — Decision 12).
 
 Attack direction flips after every KICK segment: the receiver attacks the
@@ -30,6 +31,9 @@ def _smooth(points: list[PathPoint]) -> list[PathPoint]:
     half = config.SMOOTH_WINDOW_PTS // 2
     out = []
     for i in range(len(points)):
+        if i == 0 or i == len(points) - 1:
+            out.append(points[i])  # keep true endpoints (exact metres gained)
+            continue
         window = points[max(0, i - half):i + half + 1]
         out.append(PathPoint(
             sum(p.x for p in window) / len(window),
@@ -39,14 +43,55 @@ def _smooth(points: list[PathPoint]) -> list[PathPoint]:
     return out
 
 
-def _mean_velocity(points, i, side):
-    """Mean velocity vector over HEADING_WINDOW_MS before (-1) / after (+1) index i."""
-    horizon = config.HEADING_WINDOW_MS / 1000
-    t0 = points[i].t
+def _resample(points):
+    """Re-space points uniformly by arc-length (RESAMPLE_STEP_M apart).
+
+    Fixed-rate input sampling puts more points per metre when the line is
+    drawn slowly; resampling removes that pace dependence so every downstream
+    point-count window covers a consistent spatial span. Timestamps are
+    linearly interpolated, preserving each part's true duration (and pace).
+    Endpoints are preserved exactly.
+    """
+    arc = _arc_lengths(points)
+    total = arc[-1]
+    if total < config.RESAMPLE_STEP_M:
+        return points
+    n = max(1, round(total / config.RESAMPLE_STEP_M))
+    out, j = [], 1
+    for k in range(n + 1):
+        target = total * k / n
+        while j < len(arc) - 1 and arc[j] < target:
+            j += 1
+        a, b = points[j - 1], points[j]
+        span = arc[j] - arc[j - 1]
+        f = (target - arc[j - 1]) / span if span > 1e-9 else 0.0
+        out.append(PathPoint(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f,
+                             a.t + (b.t - a.t) * f))
+    return out
+
+
+def _arc_lengths(points):
+    """Cumulative traced path length in metres at each point (arc[0] = 0)."""
+    arc, total = [0.0], 0.0
+    for a, b in zip(points, points[1:]):
+        total += math.hypot(b.x - a.x, b.y - a.y) / config.PX_PER_M
+        arc.append(total)
+    return arc
+
+
+def _mean_velocity(points, arc, i, side):
+    """Mean velocity over HEADING_WINDOW_M of arc before (-1) / after (+1) i.
+
+    Only the vector's direction is pace-invariant and used downstream; the
+    arc-length window keeps that direction estimate over a consistent spatial
+    span no matter how fast the line was drawn.
+    """
+    horizon = config.HEADING_WINDOW_M
+    a0 = arc[i]
     if side < 0:
-        sel = [p for p in points[:i + 1] if t0 - p.t <= horizon]
+        sel = [p for j, p in enumerate(points[:i + 1]) if a0 - arc[j] <= horizon]
     else:
-        sel = [p for p in points[i:] if p.t - t0 <= horizon]
+        sel = [p for j, p in enumerate(points[i:], i) if arc[j] - a0 <= horizon]
     if len(sel) < 2 or sel[-1].t <= sel[0].t:
         return None
     dt = sel[-1].t - sel[0].t
@@ -61,7 +106,7 @@ def _angle_deg(a, b) -> float:
     return math.degrees(math.acos(max(-1.0, min(1.0, dot))))
 
 
-def _boundary_candidates(points):
+def _boundary_candidates(points, arc):
     """(candidates, info): per-point evidence scores vs path-adaptive baselines.
 
     candidates: (index, score, angle, ratio) tuples where the combined
@@ -71,8 +116,8 @@ def _boundary_candidates(points):
     """
     measured = []
     for i in range(1, len(points) - 1):
-        before = _mean_velocity(points, i, -1)
-        after = _mean_velocity(points, i, +1)
+        before = _mean_velocity(points, arc, i, -1)
+        after = _mean_velocity(points, arc, i, +1)
         if before is None or after is None:
             continue
         speed_b, speed_a = math.hypot(*before), math.hypot(*after)
@@ -108,18 +153,20 @@ def _boundary_candidates(points):
     return accepted, info
 
 
-def _pick_boundaries(points, candidates, notes):
+def _pick_boundaries(arc, candidates, notes):
     """Collapse candidate runs to one boundary each, enforce min segment length.
 
-    Appends one human-readable string per drop/demote decision into notes.
+    All spacing is in metres of traced path (arc), not time — the same shape
+    segments identically however fast it was drawn. Appends one human-readable
+    string per drop/demote decision into notes.
     """
     if not candidates:
         return []
-    t_start, t_end = points[0].t, points[-1].t
-    # group consecutive candidates closer than BOUNDARY_GROUP_MS: one turn each
+    a_end = arc[-1]
+    # group candidates within BOUNDARY_GROUP_M of arc: one turn each
     groups, current = [], [candidates[0]]
     for cand in candidates[1:]:
-        if (points[cand[0]].t - points[current[-1][0]].t) * 1000 <= config.BOUNDARY_GROUP_MS:
+        if arc[cand[0]] - arc[current[-1][0]] <= config.BOUNDARY_GROUP_M:
             current.append(cand)
         else:
             groups.append(current)
@@ -128,28 +175,28 @@ def _pick_boundaries(points, candidates, notes):
     picked = [max(g, key=lambda c: c[1]) for g in groups]
     for g, p in zip(groups, picked):
         if len(g) > 1:
-            notes.append(f"group of {len(g)} cands @{points[p[0]].t - t_start:.2f}s"
+            notes.append(f"group of {len(g)} cands @{arc[p[0]]:.1f}m"
                          f" -> picked i={p[0]}")
 
-    # drop boundaries hugging the path's ends, then thin to MIN_SEGMENT_MS spacing
-    min_gap = config.MIN_SEGMENT_MS / 1000
+    # drop boundaries hugging the path's ends, then thin to MIN_SEGMENT_M spacing
+    min_gap = config.MIN_SEGMENT_M
     survivors = []
     for c in picked:
-        if points[c[0]].t - t_start < min_gap or t_end - points[c[0]].t < min_gap:
-            notes.append(f"cand @{points[c[0]].t - t_start:.2f}s dropped:"
-                         f" within {config.MIN_SEGMENT_MS}ms of path end")
+        if arc[c[0]] < min_gap or a_end - arc[c[0]] < min_gap:
+            notes.append(f"cand @{arc[c[0]]:.1f}m dropped:"
+                         f" within {config.MIN_SEGMENT_M}m of path end")
         else:
             survivors.append(c)
     kept = []
     for cand in survivors:
-        if kept and points[cand[0]].t - points[kept[-1][0]].t < min_gap:
+        if kept and arc[cand[0]] - arc[kept[-1][0]] < min_gap:
             if cand[1] > kept[-1][1]:
-                notes.append(f"cand @{points[kept[-1][0]].t - t_start:.2f}s dropped:"
-                             f" <{config.MIN_SEGMENT_MS}ms before stronger cand")
+                notes.append(f"cand @{arc[kept[-1][0]]:.1f}m dropped:"
+                             f" <{config.MIN_SEGMENT_M}m before stronger cand")
                 kept[-1] = cand
             else:
-                notes.append(f"cand @{points[cand[0]].t - t_start:.2f}s dropped:"
-                             f" <{config.MIN_SEGMENT_MS}ms after previous, weaker")
+                notes.append(f"cand @{arc[cand[0]]:.1f}m dropped:"
+                             f" <{config.MIN_SEGMENT_M}m after previous, weaker")
         else:
             kept.append(cand)
     return [c[0] for c in kept]
@@ -170,8 +217,7 @@ def _classify(points: list[PathPoint], attack_dir: int) -> tuple:
         "action_geo": action, "rule": rule,
         "forward_px": round(raw["fwd_m"] * config.PX_PER_M, 1),
         "lateral_px": round(raw["lat_m"] * config.PX_PER_M, 1),
-        "duration_s": raw["dur_s"], "speed_mps": raw["speed_net"],
-        "n_points": len(points), "attack_dir": attack_dir,
+        "net_m": raw["net_m"], "n_points": len(points), "attack_dir": attack_dir,
         "features": {f: round(feats[f], 3) for f in features.FEATURES},
         "raw": raw,
         "scores": {c: round(s, 2) for c, s in scores.items()},
@@ -285,10 +331,11 @@ def segment_path(points: list[PathPoint], attack_dir: int) -> list[Segment]:
     if net_px < config.MIN_MOVEMENT_PX:
         d["rejected"] = f"net movement {net_px:.1f}px < {config.MIN_MOVEMENT_PX}px"
         return []
-    smoothed = _smooth(points)
-    candidates, boundary_info = _boundary_candidates(smoothed)
+    smoothed = _smooth(_resample(points))
+    arc = _arc_lengths(smoothed)
+    candidates, boundary_info = _boundary_candidates(smoothed, arc)
     notes: list[str] = []
-    boundaries = _pick_boundaries(smoothed, candidates, notes)
+    boundaries = _pick_boundaries(arc, candidates, notes)
     t0 = points[0].t
     d["boundary"] = boundary_info
     d["candidates"] = [{"i": i, "t": smoothed[i].t - t0, "x": round(smoothed[i].x, 1),
@@ -303,9 +350,9 @@ def segment_path(points: list[PathPoint], attack_dir: int) -> list[Segment]:
     slices = []
     prev = 0
     for b in boundaries:
-        slices.append(points[prev:b + 1])
+        slices.append(smoothed[prev:b + 1])
         prev = b
-    slices.append(points[prev:])
+    slices.append(smoothed[prev:])
 
     segments, direction = [], attack_dir
     for sl in slices:

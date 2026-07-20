@@ -58,7 +58,7 @@ def format_report(debug: dict, chain) -> str:
         arrow = "->" if ev["attack_dir"] > 0 else "<-"
         lines.append(f"  #{i} {label:<20} rule={ev['rule']:<24}"
                      f" fwd {ev['forward_px']:+7.1f}px lat {ev['lateral_px']:+7.1f}px"
-                     f" {ev['duration_s']:.2f}s {ev['speed_mps']:.1f}m/s"
+                     f" net {ev['net_m']:.1f}m straight {ev['raw']['straightness']:.2f}"
                      f" {ev['n_points']}pts atk{arrow}")
         if "features" in ev:
             lines += _score_table(ev)

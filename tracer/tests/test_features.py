@@ -21,9 +21,9 @@ def test_raw_geometry_forward_carry():
     feats, raw = features.extract(path((0, 0, 0.0), (10, 0, 2.0)), +1)
     assert raw["fwd_m"] == pytest.approx(10.0)
     assert raw["lat_m"] == pytest.approx(0.0)
-    assert raw["dur_s"] == pytest.approx(2.0)
     assert raw["net_m"] == pytest.approx(10.0)
-    assert raw["speed_net"] == pytest.approx(5.0)
+    assert raw["straightness"] == pytest.approx(1.0)
+    assert "dur_s" not in raw  # classification does not measure time
 
 
 def test_attack_dir_mirrors_forward():
@@ -44,25 +44,35 @@ def test_backward_flick_saturates_backward_feature():
     assert feats["backward"] > 0.99
 
 
-def test_lateral_feature_zero_below_ratio_boundary():
-    # lat 10 < 1.2 x fwd 10: excess negative, rectified to exactly 0
-    feats, _ = features.extract(path((0, 0, 0.0), (10, 10, 2.0)), +1)
+def test_forward_progress_vetoes_lateral_pass():
+    # A forward run that also moves sideways is a CARRY, never a PASS.
+    # Rugby: a pass cannot gain forward ground, so forward vetoes lateral.
+    feats, _ = features.extract(path((0, 0, 0.0), (12, 15, 2.0)), +1)
     assert feats["lateral"] == 0.0
+    assert feats["backward"] == 0.0
+    _, _, action, _ = features.score(feats)
+    assert action == "CARRY"
 
 
-def test_lateral_feature_positive_above_ratio_boundary():
-    # lat 10 vs 1.2 x fwd 6 = 7.2: excess 2.8m
-    feats, _ = features.extract(path((0, 0, 0.0), (6, 10, 2.0)), +1)
-    assert feats["lateral"] == pytest.approx(math.tanh(2.8 / config.F_LAT_SCALE_M))
+def test_steep_forward_cut_is_carry():
+    feats, _ = features.extract(path((0, 0, 0.0), (8, 14, 2.0)), +1)
+    _, _, action, _ = features.score(feats)
+    assert action == "CARRY"
 
 
-def test_kickburst_requires_fast_and_short():
-    fast_short, _ = features.extract(path((0, 0, 0.0), (20, 0, 0.5)), +1)   # 40 m/s
-    slow, _ = features.extract(path((0, 0, 0.0), (10, 0, 2.0)), +1)         # 5 m/s
-    fast_long, _ = features.extract(path((0, 0, 0.0), (120, 0, 3.0)), +1)   # 40 m/s, 3s
-    assert fast_short["kickburst"] > 0.9
-    assert slow["kickburst"] == 0.0
-    assert fast_long["kickburst"] == 0.0
+def test_square_pass_fires_lateral():
+    # near-zero forward, big lateral: a square pass, still PASS
+    feats, _ = features.extract(path((0, 0, 0.0), (0.5, 10, 2.0)), +1)
+    assert feats["lateral"] > 0.5
+    _, _, action, _ = features.score(feats)
+    assert action == "PASS"
+
+
+def test_no_time_features():
+    # classification must not measure draw time: no pace/speed features exist
+    assert "relpace" not in features.FEATURES
+    assert "bursty" not in features.FEATURES
+    assert set(features.FEATURES) == {"backward", "lateral", "straight", "dist"}
 
 
 # --- extract: quality features ---------------------------------------------
@@ -89,8 +99,9 @@ def test_dist_feature():
 # --- extract: degenerate inputs --------------------------------------------
 
 def test_zero_duration_is_defined():
+    # identical timestamps must not break anything (time is unused anyway)
     feats, raw = features.extract(path((0, 0, 1.0), (10, 0, 1.0)), +1)
-    assert raw["speed_net"] == 0.0
+    assert raw["net_m"] == pytest.approx(10.0)
     for v in feats.values():
         assert math.isfinite(v)
 
@@ -146,9 +157,10 @@ def test_score_saturated_backward_is_pass():
     assert confidence > 0.98
 
 
-def test_score_kickburst_is_kick():
+def test_score_long_straight_is_kick():
     feats = zero_features()
-    feats["kickburst"] = 1.0
+    feats["dist"] = 1.0       # far
+    feats["straight"] = 1.0   # straight
     _, _, action, _ = features.score(feats)
     assert action == "KICK"
 

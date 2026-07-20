@@ -16,7 +16,7 @@ def test_format_report_committed_chain():
     m = _run("carry_pass_carry")
     r = format_report(m.last_debug, m.last_chain)
     assert "committed" in r and "segments:" in r and "boundaries:" in r
-    assert "rule=" in r and "m/s" in r
+    assert "rule=" in r and "straight" in r
 
 
 def test_format_report_rejected_chain():
@@ -34,7 +34,7 @@ def test_format_report_shows_hint_relabel():
 def test_format_report_shows_score_table():
     m = _run("carry_pass_carry")
     r = format_report(m.last_debug, m.last_chain)
-    for feat in ("backward", "lateral", "kickburst", "straight"):
+    for feat in ("backward", "lateral", "straight", "dist"):
         assert feat in r
     assert "probs" in r and "conf" in r
 

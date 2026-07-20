@@ -13,13 +13,18 @@ PITCH_WIDTH_M = 70
 IN_GOAL_DEPTH_M = 10
 
 # --- segmentation thresholds (the tunable heart of Live Trace) -----------
+# Spacing/windows are in METRES OF TRACED PATH, not milliseconds: the line is
+# read from its geometry, with no assumption about how fast it was drawn.
+RESAMPLE_STEP_M = 0.5       # re-space points uniformly by arc-length first, so
+                            # point density (and thus every point-count window)
+                            # is identical however fast the line was drawn
 SMOOTH_WINDOW_PTS = 5       # sliding-average window to cut mouse jitter
-HEADING_WINDOW_MS = 150     # mean-velocity window each side of a candidate
-BOUNDARY_GROUP_MS = 150     # consecutive candidates this close = one turn
-MIN_SEGMENT_MS = 350        # boundaries closer than this: keep the stronger
-FAST_SPEED_MPS = 15.0       # traced faster than this = kick candidate
-SHORT_DURATION_MS = 1500    # ...if the burst is also this short
-LATERAL_RATIO = 1.2         # |lateral| > ratio*|forward| = pass
+HEADING_WINDOW_M = 1.5      # arc-length each side of a candidate for heading est.
+BOUNDARY_GROUP_M = 1.5      # candidates within this arc-length = one turn
+MIN_SEGMENT_M = 4.0         # boundaries closer than this arc-length: keep stronger
+LATERAL_FWD_PENALTY = 3.0   # each forward metre cancels this many lateral metres
+                            # of PASS evidence — a pass never gains ground, so
+                            # forward progress vetoes a lateral/square pass call
 MIN_MOVEMENT_PX = 6         # smaller total displacement = accidental click
 
 # --- boundary evidence scoring (Layer 1) ----------------------------------
@@ -40,41 +45,30 @@ BOUNDARY_ACCEPT = 0.75           # single accept threshold on the combined score
                                  # wobble <=0.73 on noisy corpus)
 
 # --- classification feature squashing (Layer 2) ---------------------------
-# Each feature is tanh((raw - center)/scale); evidence features are rectified
-# (max(0, .) before tanh) so absence of evidence is 0, never negative.
-# LATERAL_RATIO / FAST_SPEED_MPS / SHORT_DURATION_MS above are the centers.
+# Each feature is tanh((raw - center)/scale); backward/lateral/dist are
+# rectified (max(0, .) before tanh) so absence of evidence is 0, never
+# negative. Every feature is purely spatial — positions only, never time.
 F_BACK_SCALE_M = 0.5             # sharp: near-step at fwd=0 (rugby law edge)
 F_LAT_SCALE_M = 1.5
-F_SPEED_SCALE_MPS = 4.0
-F_DUR_SCALE_S = 0.5
 F_STRAIGHT_CENTER = 0.85         # net/path-length above this reads deliberate
 F_STRAIGHT_SCALE = 0.10
-F_BURSTY_CENTER = 1.6            # 90th-pct/mean step speed above this = impulsive
-F_BURSTY_SCALE = 0.4
-F_DIST_SCALE_M = 15.0
+F_DIST_SCALE_M = 28.0            # kicks travel far; carries rarely > ~24m
 
 # --- classification weights: score_c = B_c + sum(W_c_f * feature_f) -------
-# CARRY is the fixed reference class (score 0, no constants here). Initial
-# values reproduce the legacy rule cascade (pinned by tests/test_scoring.py);
-# zeros are trainer headroom — python -m tracer.fit proposes, never writes.
+# CARRY is the fixed reference class (score 0, no constants here). KICK is
+# geometry-only (long + straight); ambiguous ~20-30m strokes lean CARRY (a
+# false kick would wrongly flip possession — K-hint / Review promotes a real
+# short kick). zeros are trainer headroom — python -m tracer.fit proposes.
 B_PASS = -0.2
 W_PASS_BACKWARD = 8.0
 W_PASS_LATERAL = 7.0
-W_PASS_FAST = 0.0
-W_PASS_SHORT = 0.0
-W_PASS_KICKBURST = 0.0
 W_PASS_STRAIGHT = 0.0
-W_PASS_BURSTY = 0.0
 W_PASS_DIST = 0.0
-B_KICK = -0.2
-W_KICK_BACKWARD = 0.0
+B_KICK = -6.4               # geometric kick threshold ~27m; shorter strokes stay
+W_KICK_BACKWARD = 0.0       # CARRY (distance is the necessary kick signal)
 W_KICK_LATERAL = 0.0
-W_KICK_FAST = 0.0
-W_KICK_SHORT = 0.0
-W_KICK_KICKBURST = 6.0
-W_KICK_STRAIGHT = 0.0
-W_KICK_BURSTY = 0.0
-W_KICK_DIST = 0.0
+W_KICK_STRAIGHT = 0.5
+W_KICK_DIST = 8.0
 
 # --- tap correlation ------------------------------------------------------
 DIGIT_BURST_MS = 400        # sequential digit taps within this = one number

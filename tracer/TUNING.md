@@ -7,13 +7,22 @@ every score breakdown visible in the dev panel. The logic lives in
 [`segmentation.py`](segmentation.py) + [`features.py`](features.py); tuning
 never requires touching either.
 
+**Pace-invariance is the load-bearing property.** The line is read from its
+geometry, never its drawing speed. Mechanically: the path is **resampled to
+uniform arc-length spacing** (`RESAMPLE_STEP_M`) before anything else, so
+point density is identical whether you trace fast or slow; all windows are
+measured in **metres of traced path**, not milliseconds; and no feature uses
+absolute speed. The same shape yields the same actions at any pace — pinned
+by `tests/test_pace_invariance.py`. Don't reintroduce a millisecond or m/s
+constant into the recognizer; it silently breaks this.
+
 ## The two decision layers
 
 **Layer 1 — boundary detection** (where does one action end?). Each interior
-point of the smoothed path gets heading-change (`angle`) and speed-change
-(`ratio`) measurements from `HEADING_WINDOW_MS` velocity windows. Evidence is
-scored against **this path's own baselines** (median angle/ratio, floored) —
-a wobbly hand raises the bar automatically:
+point of the resampled path gets heading-change (`angle`) and speed-change
+(`ratio`) measurements from `HEADING_WINDOW_M` (arc-length) velocity windows.
+Evidence is scored against **this path's own baselines** (median angle/ratio,
+floored) — a wobbly hand raises the bar automatically:
 
 ```
 score = W_BOUNDARY_ANGLE * tanh(max(0, angle - angle_base) / BOUNDARY_ANGLE_SCALE_DEG)
@@ -23,53 +32,66 @@ boundary iff score >= BOUNDARY_ACCEPT
 
 where `angle_base = max(BOUNDARY_ANGLE_FLOOR_DEG, median angle) * BOUNDARY_ANGLE_BASE_MULT`
 (ratio analogous). Either evidence alone can clear the accept threshold.
-Grouping (`BOUNDARY_GROUP_MS`), end-drop and thinning (`MIN_SEGMENT_MS`), and
-the accidental-click reject (`MIN_MOVEMENT_PX`) are unchanged.
+Grouping (`BOUNDARY_GROUP_M`), end-drop and thinning (`MIN_SEGMENT_M`) are in
+metres of path; the accidental-click reject (`MIN_MOVEMENT_PX`) is unchanged.
+`BOUNDARY_ACCEPT = 0.75` sits mid-band (sweep 2026-07-20, 0.65-0.85 all-pass
+across the corpus). The `angle`/`ratio` evidence is itself pace-invariant
+(directions don't scale with pace; the ratio cancels it) — only the window
+units and point density were pace-bound, which resampling + metre windows fix.
 
-Calibration on the noisy corpus: genuine turns score **>= 0.92**, end-of-trace
-release wobble **<= 0.73** — `BOUNDARY_ACCEPT = 0.75` sits mid-band (sweep
-2026-07-20, 0.65-0.85 all-pass).
-
-**Layer 2 — classification** (what is each segment?). Eight named features
-per segment ([`features.py`](features.py)), each squashed to roughly [-1, 1]:
+**Layer 2 — classification** (what is each segment?). Four named features
+per segment ([`features.py`](features.py)), each squashed to roughly [-1, 1],
+**purely spatial** — computed from point positions only, never timestamps.
+The time taken to draw the line is not measured and never affects the class:
 
 | Feature | What it measures | Evidence for |
 |---|---|---|
 | `backward` | net motion against attack direction (rectified, sharp) | PASS — the rugby-law signal |
-| `lateral` | lateral excess over `LATERAL_RATIO` x forward (rectified) | PASS |
-| `fast` | net speed vs `FAST_SPEED_MPS` | (trainable) |
-| `short` | duration vs `SHORT_DURATION_MS` | (trainable) |
-| `kickburst` | `min(rect(fast), rect(short))` — fast AND short | KICK |
-| `straight` | net displacement / path length | (trainable) |
-| `bursty` | 90th-pct / mean step speed | (trainable) |
-| `dist` | net displacement magnitude | (trainable) |
+| `lateral` | lateral movement, **minus `LATERAL_FWD_PENALTY` × forward gain** | PASS (square pass) |
+| `dist` | net displacement magnitude (metres) | KICK — kicks travel far |
+| `straight` | net displacement / path length | KICK (mild) |
+
+**A pass cannot gain forward ground** (a forward pass is illegal), so forward
+progress *vetoes* both PASS features: `backward` is rectified (0 unless the
+segment loses ground) and `lateral` subtracts `LATERAL_FWD_PENALTY` metres of
+forward gain per lateral metre. A forward-and-sideways run (arc, cut, diagonal)
+therefore scores **CARRY**, never PASS — this is the fix for the reported
+"forward movement classed as a pass" bug. Raising `LATERAL_FWD_PENALTY` makes
+the veto stricter.
 
 Per class: `score = B_c + Σ W_c_FEATURE * feature`; **CARRY is the fixed
 reference class** (score 0 — no constants). Softmax gives probabilities;
 argmax wins (CARRY wins ties); `confidence = top prob - second prob` (dev
-panel only). Attack direction still flips after every KICK — a marginal kick
-call corrupts everything downstream, and the dev panel now shows you its
-margin. Known limit: a K/P/R hint that changes a KICK call does **not**
-re-flip downstream attack direction (taps run after geometry).
+panel only). **KICK is geometry-only**: `W_KICK_DIST` dominates (distance is
+the necessary signal), `straight` modulates. The kick threshold sits ~27m
+(`B_KICK`/`W_KICK_DIST`/`F_DIST_SCALE_M`); 20-30m strokes are ambiguous and
+lean **CARRY** (a false kick wrongly flips possession — the K hint or Review
+promotes a real short kick). Attack direction flips after every KICK; a K/P/R
+hint that changes a KICK call does **not** re-flip downstream attack direction
+(taps run after geometry).
 
-Shipped weights encode the retired rule cascade exactly (pinned by the
-parity test in `tests/test_scoring.py`): `W_PASS_BACKWARD=8 > W_PASS_LATERAL=7 >
-W_KICK_KICKBURST=6` mirrors old rule priority; the zeros are trainer headroom.
+**Boundary detection** still uses the heading-change *and* a within-trace
+speed-*ratio* (relative acceleration) to find where actions change — the ratio
+is pace-invariant (it cancels a global pace change) and detection-only; it
+never reaches the classifier. It is needed because a carry→kick transition
+often has no heading change, only a speed change. Classification itself reads
+zero timing.
 
 ## Symptom -> knob
 
 | Symptom | Likely fix |
 |---|---|
-| One action splits into phantom segments | Raise `BOUNDARY_ACCEPT`; check the dev report — accepted candidates show their score |
-| Real turn not detected (two actions read as one) | Lower `BOUNDARY_ACCEPT` — the report's **near-miss** lines show exactly what the missed turn scored; if its angle sat under `angle_base`, lower `BOUNDARY_ANGLE_BASE_MULT` |
-| Double boundaries at one turn | Raise `BOUNDARY_GROUP_MS` |
-| Quick phases swallowed | Lower `MIN_SEGMENT_MS` |
-| Kicks read as carries | Check segment's `kickburst` row in the score table: if `fast` or `short` sat at 0, lower `FAST_SPEED_MPS` / raise `SHORT_DURATION_MS`; else raise `W_KICK_KICKBURST` |
-| Carries read as kicks | Raise `FAST_SPEED_MPS` or lower `W_KICK_KICKBURST` |
-| Flat passes read as carries | Raise `W_PASS_LATERAL` or lower `F_LAT_SCALE_M` (sharper) or lower `LATERAL_RATIO` |
-| Crabbing runs read as passes | Raise `LATERAL_RATIO` or lower `W_PASS_LATERAL` |
-| Driven-back carries read as passes | The soft-backward payoff: add CARRY-favoring evidence via **negative** PASS weights on `straight`/`short` (a tackle wiggle is neither straight nor brief) — or let `python -m tracer.fit` find them once such traces are promoted |
+| **Corner not detected (two actions read as one)** | Lower `MIN_SEGMENT_M` (it drops boundaries closer than this in metres) and/or lower `BOUNDARY_ACCEPT` — the report's **near-miss** lines show what the missed corner scored |
+| One action splits into phantom segments | Raise `BOUNDARY_ACCEPT`; accepted candidates show their score in the report |
+| Double boundaries at one turn | Raise `BOUNDARY_GROUP_M` |
+| **Forward movement read as a PASS** | Raise `LATERAL_FWD_PENALTY` so forward gain vetoes lateral harder (should never happen — forward strokes are CARRY by construction); check the segment's `fwd` in the report is actually positive |
+| Kicks read as carries | Segment's score table: if `dist` is low the stroke is short for a kick — lower `F_DIST_SCALE_M` / raise `W_KICK_DIST` / raise `B_KICK` toward 0; a genuinely short kick needs the K hint |
+| Carries read as kicks | Lower `B_KICK` (more negative) or raise `F_DIST_SCALE_M` so the kick distance bar sits higher |
+| Flat/square passes read as carries | Raise `W_PASS_LATERAL`, lower `F_LAT_SCALE_M` (sharper), or lower `LATERAL_FWD_PENALTY` (weaker forward veto) |
+| Crabbing forward runs read as passes | Raise `LATERAL_FWD_PENALTY` or lower `W_PASS_LATERAL` |
+| Driven-back carries read as passes | Add CARRY-favoring evidence via **negative** PASS weight on `straight` (a tackle wiggle isn't straight) — or let `python -m tracer.fit` find it once such traces are promoted |
 | Short legitimate traces vanish | Lower `MIN_MOVEMENT_PX` |
+| Same shape classifies differently at different speeds | A pace-invariance regression — a time/speed term crept into classification, or a window is point-count not metres. Run `test_pace_invariance.py` |
 | Everything after one segment wrong | Marginal KICK call flipped attack direction — the score table shows its confidence |
 
 ## The tuning loop
@@ -93,32 +115,31 @@ W_KICK_KICKBURST=6` mirrors old rule priority; the zeros are trainer headroom.
      counts + confusion. Weights barely move until real traces disagree with
      the synthetic corpus — that is correct behavior.
 5. **Decide and edit by hand** — paste/adjust in `config.py`.
-6. **Verify** — `python -m pytest tracer/tests/` (the parity test only pins
-   the *initial* weights encoding; once you deliberately retune, update or
-   retire it — it exists to guarantee the switchover, not to freeze tuning
-   forever). Then re-trace live in dev mode.
+6. **Verify** — `python -m pytest tracer/tests/`, especially
+   `test_pace_invariance.py` (the same shape must classify identically across
+   pace) and `test_corpus.py`. Then re-trace live in dev mode.
 
 ## Old -> new constants
 
 | Retired | Replaced by |
 |---|---|
-| `ANGLE_THRESHOLD_DEG = 55` | `BOUNDARY_*` baselines/scales + `BOUNDARY_ACCEPT` |
-| `SPEED_RATIO_THRESHOLD = 2.5` | same |
-| cascade rule "backward => PASS" | `W_PASS_BACKWARD` (soft, sharply squashed) |
-| cascade rule "lateral => PASS" | `W_PASS_LATERAL` + `F_LAT_SCALE_M` |
-| cascade rule "fast+short => KICK" | `W_KICK_KICKBURST` (min-composed AND) |
-| `LATERAL_RATIO`, `FAST_SPEED_MPS`, `SHORT_DURATION_MS` | still present — now feature *centers* |
+| `ANGLE_THRESHOLD_DEG`, `SPEED_RATIO_THRESHOLD` | `BOUNDARY_*` baselines/scales + `BOUNDARY_ACCEPT` |
+| `HEADING_WINDOW_MS`, `BOUNDARY_GROUP_MS`, `MIN_SEGMENT_MS` (milliseconds) | `HEADING_WINDOW_M`, `BOUNDARY_GROUP_M`, `MIN_SEGMENT_M` (metres of path) + `RESAMPLE_STEP_M` |
+| `FAST_SPEED_MPS`, `SHORT_DURATION_MS`, `F_RELPACE_*`, `F_BURSTY_*` (any time/speed) | **gone** — kick is now `dist` + `straight` (geometry only) |
+| features `fast`, `short`, `kickburst`, `relpace`, `bursty` | `dist`, `straight` — no feature reads time |
+| `LATERAL_RATIO` (`|lat| > ratio·|fwd|`) | `LATERAL_FWD_PENALTY` (forward gain *vetoes* lateral: `|lat| − penalty·max(0,fwd)`) |
 
 ## Adapting beyond thresholds
 
 - **New scenario**: `_sc(...)` in [`fixtures.py`](fixtures.py) — joins corpus,
-  sweep, and fit automatically.
-- **New feature** (e.g. curvature for spiral kicks): add its formula +
+  sweep, fit, and the pace fence automatically.
+- **New feature** (e.g. curvature for spiral kicks): keep it pace-invariant
+  (a distance or a ratio, never an absolute speed/time). Add its formula +
   `F_*` scale in `features.py`/`config.py`, append to `FEATURES`, add
-  `W_PASS_*`/`W_KICK_*` zeros — extraction, scoring, dev table, sweep, and
-  fit all pick it up by name with no further wiring.
+  `W_PASS_*`/`W_KICK_*` zeros — extraction, scoring, dev table, sweep, and fit
+  all pick it up by name with no further wiring.
 - **New class** (e.g. OFFLOAD): add to `SCORED_CLASSES` + its `B_`/`W_`
   block; downstream consumers of `seg.action` must learn the new string
   (canvas color, events possession logic).
-- **Different sport/scale**: `PX_PER_M`, pitch dims, `FAST_SPEED_MPS` are the
-  physical anchors; gesture dynamics transfer roughly as-is.
+- **Different sport/scale**: `PX_PER_M` and pitch dims are the physical
+  anchors; the metre-based windows and distance scales transfer with them.

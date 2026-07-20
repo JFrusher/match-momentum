@@ -1,9 +1,10 @@
 """Synthetic-path fixtures with known ground truth — the project's stop gate.
 
-Paths are built leg by leg at a realistic mousemove rate (60 Hz). Speeds are
-chosen to mimic real-time tracing: a carry tracks a runner (~2-8 m/s), a
-pass is a quick backward/lateral flick, a kick is a fast long sweep.
-PX_PER_M converts the metre-based leg specs into pixel coordinates.
+Paths are built leg by leg at a 60 Hz mousemove rate. Classification reads
+geometry, not speed: a carry is a shorter run, a pass a backward/lateral
+flick, a kick a long straight stroke. Durations only set point timing;
+pace-invariance is pinned separately in test_pace_invariance.py. PX_PER_M
+converts the metre-based leg specs into pixel coordinates.
 """
 
 import math

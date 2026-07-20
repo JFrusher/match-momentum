@@ -98,9 +98,10 @@ def _sc(name, **kw):
 
 
 # --- corpus ----------------------------------------------------------------
-# Realistic tracing speeds: carry 2-8 m/s, pass a 0.45-0.6s flick, kick
-# 35-40m in ~0.5s. Legs >= 0.45s (> MIN_SEGMENT_MS); corner angles score
-# clear of BOUNDARY_ACCEPT on the intended side.
+# Durations set a plausible tracing pace, but classification no longer reads
+# absolute speed: the same shapes segment identically at any pace (pinned by
+# test_pace_invariance). Distances are what matter — kicks 30m+, carries
+# shorter, passes lateral/backward; corners score clear of BOUNDARY_ACCEPT.
 CS = dict(waypoints=((10, 35), (22, 35)), durations=(3.0,))       # 1-seg carry
 CPC = dict(waypoints=((10, 35), (20, 35), (19, 43), (31, 43)),    # boundary
            durations=(2.5, 0.45, 3.0))                            # ~2.5s, ~2.95s
@@ -116,10 +117,11 @@ _sc("pass_backward", waypoints=((40, 35), (33, 37)), durations=(0.5,),
     expect={"actions": ["PASS"]})
 _sc("pass_lateral", waypoints=((40, 35), (41, 45)), durations=(0.5,),
     expect={"actions": ["PASS"]})
-_sc("pass_ratio_edge", waypoints=((40, 35), (46, 45)), durations=(0.6,),
-    expect={"actions": ["PASS"]})                     # lat 10 > 1.2 x fwd 6
+_sc("forward_lateral_carry", waypoints=((40, 35), (46, 45)), durations=(0.6,),
+    expect={"actions": ["CARRY"]})   # fwd 6 + lat 10: gains ground => CARRY, not
+                                     # a (forward, illegal) pass — the reported bug
 _sc("carry_ratio_edge", waypoints=((40, 35), (50, 45)), durations=(1.8,),
-    expect={"actions": ["CARRY"]})                    # lat 10 < 1.2 x fwd 10
+    expect={"actions": ["CARRY"]})                    # fwd 10 lat 10: CARRY
 _sc("kick_long", waypoints=((30, 35), (68, 33)), durations=(0.55,),
     expect={"actions": ["KICK"]})
 _sc("kick_return", waypoints=((30, 35), (62, 35), (52, 34)),
@@ -139,9 +141,9 @@ _sc("switchback_cut", waypoints=((10, 35), (18, 35), (16.5, 35), (26, 35)),
 _sc("hesitation_carry", waypoints=((10, 35), (16, 35), (16.8, 35), (24, 35)),
     durations=(1.5, 0.6, 2.0),                        # slow-down, no turn
     expect={"forbid": {"PASS", "KICK"}, "n_segments": (1, 3)})
-_sc("speed_burst_carry", waypoints=((10, 35), (16, 35), (40, 35)),
-    durations=(2.0, 2.0),                             # 12 m/s but 2s: not a kick
-    expect={"forbid": {"PASS", "KICK"}})
+_sc("speed_burst_carry", waypoints=((10, 35), (16, 35), (30, 35)),
+    durations=(2.0, 1.0),                             # accelerates but stays a
+    expect={"forbid": {"PASS", "KICK"}})              # carry-distance run: CARRY
 _sc("accidental_twitch", waypoints=((30, 35), (30.3, 35)), durations=(0.2,),
     expect={"rejected": True})
 _sc("mirrored_attack", attack_dir=-1,

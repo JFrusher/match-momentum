@@ -1,5 +1,7 @@
 # Match Momentum — rebuilding FIFA's World Cup 2026 broadcast chart
 
+[![tests](https://github.com/Jfrusher/match-momentum/actions/workflows/tests.yml/badge.svg)](https://github.com/Jfrusher/match-momentum/actions/workflows/tests.yml)
+
 Watching the 2026 World Cup, I kept noticing the **Match Momentum** graphic on the broadcast — a mirrored area chart showing which team is "on top" minute by minute. FIFA doesn't publish the methodology, so I rebuilt it from scratch.
 
 ![Match momentum chart](momentum_arg_egy.png)
@@ -64,10 +66,22 @@ Edit an `examples/*.json` file (or point at your own) to chart any match. `event
 
 ## Tracer (live tagging)
 
-`tracer/` is a NiceGUI app for logging a rugby match live by **tracing the ball's path with the mouse**: one continuous drag per possession chain, auto-segmented into carries/passes/kicks by geometry, with keyboard taps layering on player numbers, linebreaks, and score events. Traced distance and territory feed the momentum weights directly instead of typed estimates. It validates every export by running the real `RugbySport` translator in-process; `examples/tracer-sample.json` is its round-trip proof artifact. See `tracer/README.md` for the mechanic, hotkeys, and tuning.
+The model needs an event stream, and typing one out during a match is slow and imprecise. `tracer/` is a NiceGUI app for logging a rugby match by **tracing the ball's path with the mouse**: one continuous drag per possession, auto-segmented into carries, passes and kicks by the geometry of the line alone.
+
+![Live Trace](tracer_demo.png)
+
+Amber carry, blue pass, red kick; the white dots are where the recognizer cut the line. Keyboard taps layer on player numbers, linebreaks and scores without interrupting the drag. Traced distance and territory feed the momentum weights directly instead of typed estimates.
+
+Each possession also records **how it began** — scrum, lineout, penalty, restart, turnover, interception — because in rugby that is a large part of what the possession is worth. Most of it is read off the trace (a kick ending at a touchline is a lineout; the kick-to-touch-on-the-full law decides where the lineout is taken); the two things a line cannot show, a scrum and a penalty, are single taps. Every inferred attribution renders as a chip on the pitch, and the chip is the correction UI: there are two teams, so a wrong guess is one click from right.
+
+The line is read from its **shape, never its speed** — the same trace classifies identically whether drawn in real time or sketched afterwards, which is what makes tracing from paused, scrubbed video possible. `tests/test_pace_invariance.py` pins that property.
+
+Every export is validated by running the real `RugbySport` translator in-process; `examples/tracer-sample.json` is the round-trip proof artifact. See `tracer/README.md` for the mechanic and hotkeys, `tracer/TUNING.md` for the recognizer.
 
 ```bash
 python -m tracer.app
 ```
 
-The previous tagging tool — a React/TypeScript keyboard-only event logger — is archived unchanged in `legacy/tagger/` (see its README; `TAGGER_PLAN.md` documents its build history).
+**What this has not yet done:** the tracer has never been used on a real match. Its thresholds are tuned against 39 synthetic fixture scenarios and a pace-invariance fence, not against a human tracing live footage, and the `origin_factor` weights that price a lineout against a scrum are unvalidated judgement calls. The screenshot above is a synthetic trace. Until a real match has been traced end to end, treat this as a working instrument with an untested calibration — the same standard the football model is held to above.
+
+The previous tagging tool — a React/TypeScript keyboard-only event logger — is archived unchanged in `legacy/tagger/`. It was replaced because a keyboard vocabulary can record *that* a carry happened but not *where*, and territory is most of rugby's momentum signal.

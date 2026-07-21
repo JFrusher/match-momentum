@@ -27,6 +27,8 @@ class MomentumEngine:
                 continue
             dt = t - ev.t
             y += np.where(dt >= 0, ev.weight * np.exp(-self._lambda * np.clip(dt, 0, None)), 0.0)
+        if not self.smooth_sigma:
+            return y  # scipy divides by sigma, so "no smoothing" must skip it
         return gaussian_filter1d(y, self.smooth_sigma * self.resolution)
 
     def compute(self, events, home, away, max_t):

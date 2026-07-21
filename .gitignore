@@ -9,3 +9,5 @@ legacy/tagger/node_modules/
 legacy/tagger/dist/
 .playwright-mcp/
 .pytest_cache/
+.vscode/
+scratch/

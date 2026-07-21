@@ -1,0 +1,21 @@
+name: tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      # test_corpus.py already runs the whole fixture corpus at baseline
+      # config, so the recognizer is gated here too. tracer.sweep is a tuning
+      # report that always exits 0 — running it in CI would prove nothing.
+      - run: python -m pytest -q

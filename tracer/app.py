@@ -14,11 +14,18 @@ from nicegui import ui
 
 from . import autosave
 from .canvas import TraceCanvas
+from .chips import build_chips
 from .devpanel import build_dev_panel
 from .events import compute_score
 from .export import export_json
+from .pitch import pitch_svg
 from .review import open_review
 from .setup import setup_form
+
+
+def markings(m):
+    """Pitch markings tinted for who is defending which end right now."""
+    return pitch_svg(m.team_colors, m.attack_dir_home, m.team_names)
 
 DIR_ARROWS = {1: "→", -1: "←"}
 REASON_TEXT = {"kick": "won on kick", "turnover": "won on turnover",
@@ -30,14 +37,25 @@ DEV_CLI = "dev" in sys.argv[1:]  # for the native window, where ?dev=1 is unreac
 def index(dev: bool = False):  # ?dev=1 enables the dev drawer
     # per-connection state, built inside the page closure: module-level state
     # would let two tabs / a reload corrupt each other's match
-    ctx = {"match": None}
+    ctx = {"match": None, "canvas": None}
     root = ui.column().classes("items-center gap-3 w-full")
+
+    def undo():
+        m = ctx["match"]
+        if m:
+            m.undo_last()
+            ctx["canvas"].render_segments([])   # drop the drawing it belonged to
 
     def handle_key(e):
         m = ctx["match"]
         if m is None:
             return
         t = time.monotonic()
+        # intercept before dispatch: "z" is also the home-possession key, so
+        # an un-intercepted Ctrl+Z would undo AND hand the ball to home
+        if e.action.keydown and e.modifiers.ctrl and e.key.name.lower() == "z":
+            undo()
+            return
         if e.action.keydown:
             m.key_down(e.key.name, t)
         elif e.action.keyup:
@@ -46,8 +64,10 @@ def index(dev: bool = False):  # ?dev=1 enables the dev drawer
     ui.keyboard(on_key=handle_key, repeating=False)
 
     def save_now():
-        if ctx["match"]:
-            autosave.save_session(ctx["match"].to_dict())
+        m = ctx["match"]
+        if m:
+            autosave.save_session(m.to_dict(), autosave.session_path(
+                m.team_names["home"], m.team_names["away"]))
 
     def build_match_ui(m):
         ctx["match"] = m
@@ -56,12 +76,23 @@ def index(dev: bool = False):  # ?dev=1 enables the dev drawer
             with ui.row().classes("items-center gap-4"):
                 clock_lbl = ui.label("00:00").classes("text-3xl font-mono")
                 clock_btn = ui.button(icon="play_arrow", on_click=m.clock.toggle)
-                score_lbl = ui.label().classes("text-2xl font-mono")
+                chip_cls = ("px-2 py-0.5 rounded text-white text-2xl "
+                            "font-mono font-bold")
+                home_chip = ui.label().classes(chip_cls) \
+                    .style(f"background:{m.team_colors['home']}")
+                away_chip = ui.label().classes(chip_cls) \
+                    .style(f"background:{m.team_colors['away']}")
                 status_lbl = ui.label().classes("text-lg")
                 ui.button("Halftime flip", on_click=m.halftime_flip).props("outline")
                 ui.button("Review", on_click=lambda: open_review(m)).props("outline")
+                ui.button("Undo", icon="undo", on_click=undo).props("outline") \
+                    .tooltip("Ctrl+Z — rewind the last committed chain")
             canvas = TraceCanvas(on_down=m.mouse_down, on_move=m.mouse_move,
-                                 on_up=m.mouse_up)
+                                 on_up=m.mouse_up,
+                                 on_segment_click=m.reclassify_segment,
+                                 base_svg=markings(m))
+            ctx["canvas"] = canvas
+            chips = build_chips(m, canvas.chip_layer)
             with ui.row().classes("items-center gap-2"):
                 path_in = ui.input("Export path", value="examples/tracer-sample.json") \
                     .classes("w-72")
@@ -74,25 +105,42 @@ def index(dev: bool = False):  # ?dev=1 enables the dev drawer
                         ui.notify(f"exported {path_in.value}", type="positive")
 
                 ui.button("Validate + export", on_click=do_export)
-                ui.label("Trace = hold mouse · A/Space = end play · K/P/R hint · "
-                         "L break · Shift intercept · digits player · Z/X team · "
-                         "T/N/G/V/B events · C/M conversion").classes("text-xs text-gray-500")
+                ui.label("Trace = hold mouse · A/Space = end play · S scrum · "
+                         "F penalty · K/P/R hint (or click a segment) · L break · "
+                         "Shift intercept · digits player · Z/X team · "
+                         "T/N/G/V/B events · C/M conversion · Ctrl+Z undo"
+                         ).classes("text-xs text-gray-500")
+
+        # last score and direction drawn, so a change can react to itself
+        shown = {"score": None, "dir": m.attack_dir_home}
 
         def refresh():
             secs = int(m.clock.seconds())
+            if shown["dir"] != m.attack_dir_home:      # halftime: retint the ends
+                shown["dir"] = m.attack_dir_home
+                canvas.set_pitch(markings(m))
             clock_lbl.text = f"{secs // 60:02d}:{secs % 60:02d}"
             clock_btn.props(f'icon={"pause" if m.clock.running else "play_arrow"}')
             score = compute_score(m.events, m.team_names)
-            score_lbl.text = (f"{m.team_names['home']} {score['home']}"
-                              f" – {score['away']} {m.team_names['away']}")
+            home_chip.text = f"{m.team_names['home']} {score['home']}"
+            away_chip.text = f"{score['away']} {m.team_names['away']}"
+            if shown["score"] not in (None, score):
+                ui.notify(f"{home_chip.text} – {away_chip.text}",
+                          type="positive", position="top", timeout=3000)
+            shown["score"] = dict(score)
             poss_dir = m.attack_dir_home if m.possession == "home" else -m.attack_dir_home
             reason = REASON_TEXT.get(m.last_end_reason)
             status_lbl.text = (f"{m.team_names[m.possession]} {DIR_ARROWS[poss_dir]}"
                                + (f" · {reason}" if reason else "")
                                + f" · {len(m.events)} events")
 
-        m.on_commit = lambda chain: canvas.render_segments(chain.segments)
-        m.on_change = lambda: (save_now(), refresh())
+        def committed(chain):
+            canvas.render_segments(chain.segments)
+            if m.last_summary:  # catch a misread now, not in the dev panel
+                ui.notify(m.last_summary, position="top", timeout=2500)
+
+        m.on_commit = committed
+        m.on_change = lambda: (save_now(), refresh(), chips.refresh())
         # timers must attach to a live slot: begin() runs inside the setup
         # form's click handler, whose slot root.clear() just deleted
         with root:
@@ -106,7 +154,7 @@ def index(dev: bool = False):  # ?dev=1 enables the dev drawer
     def begin(match):
         build_match_ui(match)
 
-    setup_form(root, begin, autosave.load_session())
+    setup_form(root, begin, autosave.latest_session())
 
 
 if __name__ in {"__main__", "__mp_main__"}:

@@ -11,13 +11,15 @@ forced error).
 _territory_weight() stay the single source of truth.
 """
 
+from dataclasses import dataclass
+
 from . import config
 from .geometry import PitchCalibration
 
 # Score types that end a possession and trigger a restart (scoring team
 # receives). Conversions follow a try by the same team, so they don't
 # independently determine the next possessor.
-RESTART_SCORE_TYPES = ("try", "penalty_kick", "drop_goal")
+RESTART_SCORE_TYPES = ("try", "penalty_try", "penalty_kick", "drop_goal")
 
 
 def _other(team):
@@ -52,6 +54,66 @@ def infer_next_possession(chain_start_team: str, final_team: str,
     return _other(chain_start_team)
 
 
+@dataclass(frozen=True)
+class ChainOrigin:
+    """How the next possession begins, and where to draw its chip."""
+    reason: str
+    team: str                      # "home"/"away" — who has the ball next
+    mark: tuple | None = None      # (x_px, y_px) chip anchor; None = no chip
+    alt_mark: tuple | None = None  # the other lawful mark, when there are two
+
+
+def infer_origin(*, segments, chain_start_team, final_team, scored_team,
+                 armed, attack_dir_home, cal: PitchCalibration = PitchCalibration()
+                 ) -> ChainOrigin:
+    """Read how this chain ended to decide how the next one starts.
+
+    Everything here is derived from geometry the trace already contains, so
+    the common cases need no extra input. What cannot be seen in a line — a
+    penalty, a knock-on — is tapped instead and never reaches this function.
+    """
+    team = infer_next_possession(chain_start_team, final_team, scored_team)
+    if scored_team:
+        return ChainOrigin("restart", team, _halfway(cal))
+
+    last = segments[-1]
+    end = last.points[-1]
+    if last.action == "KICK" and cal.ends_in_touch(end.y):
+        if armed == "kick_to_touch":
+            # a penalty to touch keeps the throw AND the ground, unlike an
+            # open-play kick, which is why the armed case bypasses the law
+            return ChainOrigin("lineout", chain_start_team, (end.x, end.y))
+        kicker_dir = attack_dir_home if last.team == "home" else -attack_dir_home
+        kick_from = last.points[0].x
+        mark_x = cal.lineout_mark_x(kick_from, end.x, kicker_dir)
+        # the other lawful mark: a bounce before the line makes it the exit
+        # point, a kick on the full makes it the kick itself
+        alt_x = end.x if mark_x == kick_from else kick_from
+        return ChainOrigin("lineout", team, (mark_x, end.y), (alt_x, end.y))
+    if last.action == "KICK":
+        return ChainOrigin("kick_return", team)
+    if any(s.intercepted for s in segments):
+        return ChainOrigin("interception", team)
+    return ChainOrigin("turnover_open", team, (end.x, end.y))
+
+
+def _halfway(cal: PitchCalibration) -> tuple:
+    return (cal.left_try_line_px + config.PITCH_LENGTH_M / 2 * cal.px_per_m,
+            cal.width_px / 2)
+
+
+def summarise(events: list[dict], actions: list[str]) -> str:
+    """One-line commit summary for the UI toast — 'ENG · CARRY-PASS · 12m'.
+
+    Reads the events the chain just produced rather than recomputing geometry,
+    so the toast can never disagree with what was actually recorded.
+    """
+    if not events:
+        return ""
+    metres = sum(e.get("metres_gained", 0) for e in events)
+    return f"{events[0]['team']} · {'-'.join(actions)} · {metres:g}m"
+
+
 def compute_score(events, team_names: dict) -> dict:
     """Sum point-scoring events into {"home": int, "away": int}."""
     score = {"home": 0, "away": 0}
@@ -65,7 +127,8 @@ def compute_score(events, team_names: dict) -> dict:
 
 
 def chain_to_events(chain, team_names: dict, attack_dir_home: int,
-                    cal: PitchCalibration = PitchCalibration()) -> list[dict]:
+                    cal: PitchCalibration = PitchCalibration(),
+                    start_reason: str = None) -> list[dict]:
     """chain.segments must already be tap-applied and team-assigned."""
     if not chain.segments:
         return []
@@ -97,6 +160,14 @@ def chain_to_events(chain, team_names: dict, attack_dir_home: int,
             "end_metres_from_line": cal.end_metres_from_line(end_pt.x, attack_dir),
             "linebreaks": sum(1 for s in sub if s.linebreak),
         }
+        if i == 0:
+            # only the first sub-chain has an origin worth naming: later ones
+            # exist because a kick or interception split this chain, which is
+            # already recorded in the segment that did it
+            ev["start_metres_from_line"] = cal.metres_from_line(
+                start_pt.x, attack_dir)
+            if start_reason:
+                ev["start_reason"] = start_reason
         players = [{"number": p.number, "role": p.role}
                    for s in sub for p in s.players]
         if players:

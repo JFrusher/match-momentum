@@ -2,6 +2,7 @@
 
 from nicegui import ui
 
+from . import config
 from .match_state import MatchState
 
 
@@ -17,8 +18,14 @@ def setup_form(container, on_start, saved: dict = None):
                 ui.button("Resume session",
                           on_click=lambda: on_start(MatchState.from_dict(saved)))
                 ui.separator()
-            home = ui.input("Home team", value="HOME")
-            away = ui.input("Away team", value="AWAY")
+            with ui.row().classes("items-end gap-2"):
+                home = ui.input("Home team", value="HOME")
+                home_color = ui.color_input(
+                    label="Home colour", value=config.TEAM_COLORS["home"]).classes("w-32")
+            with ui.row().classes("items-end gap-2"):
+                away = ui.input("Away team", value="AWAY")
+                away_color = ui.color_input(
+                    label="Away colour", value=config.TEAM_COLORS["away"]).classes("w-32")
             direction = ui.select({1: "Home attacks →", -1: "Home attacks ←"},
                                   value=1, label="First-half direction")
             possession = ui.select({"home": "Home", "away": "Away"},
@@ -26,5 +33,6 @@ def setup_form(container, on_start, saved: dict = None):
             # ponytail: squad-number rosters skipped; add if digit-tap typos get annoying
             ui.button("Start match", on_click=lambda: on_start(MatchState(
                 home.value.strip() or "HOME", away.value.strip() or "AWAY",
-                attack_dir_home=direction.value, possession=possession.value)))
+                attack_dir_home=direction.value, possession=possession.value,
+                team_colors={"home": home_color.value, "away": away_color.value})))
     return card

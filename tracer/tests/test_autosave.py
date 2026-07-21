@@ -1,6 +1,8 @@
 import json
+import os
 
-from tracer.autosave import clear_session, load_session, save_session
+from tracer.autosave import (clear_session, latest_session, load_session,
+                             save_session, session_path)
 from tracer.match_state import MatchState
 
 
@@ -35,3 +37,25 @@ def test_saved_file_is_valid_json(tmp_path):
     f = tmp_path / "s.json"
     save_session({"events": [], "teams": {"home": "A", "away": "B"}}, f)
     json.loads(f.read_text(encoding="utf-8"))
+
+
+# --- one file per match, so a second game can't clobber the first ----------
+def test_session_path_slugs_team_names():
+    assert session_path("England", "New Zealand").name == "england_v_new_zealand.json"
+
+
+def test_session_path_survives_punctuation_and_spaces():
+    assert session_path("Côte d'Ivoire", "St. Helena").name.endswith(".json")
+    assert "/" not in session_path("A/B", "C D").name
+
+
+def test_latest_session_returns_the_newest(tmp_path):
+    old, new = tmp_path / "old.json", tmp_path / "new.json"
+    save_session({"events": [1]}, old)
+    save_session({"events": [2]}, new)
+    os.utime(old, (1, 1))
+    assert latest_session(tmp_path) == {"events": [2]}
+
+
+def test_latest_session_with_no_sessions_is_none(tmp_path):
+    assert latest_session(tmp_path) is None

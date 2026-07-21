@@ -10,11 +10,13 @@ therefore handled differently:
     pre-set weight; _territory_weight() derives one from metres gained,
     how close the sequence ended to the try line, and any linebreaks.
 
-Cards (sin_bin) are deliberately marker-only, not fed into the decay sum --
-going to 14 men isn't itself threat creation, and the pressure it invites is
-already captured by the phase_sequence/score events that follow. Crediting
-the card directly would double-count that signal. This is a judgement call,
-not a derived fact -- revisit once there's real match data to validate
+Cards (sin_bin, red_card) are deliberately marker-only, not fed into the decay
+sum -- going to 14 men isn't itself threat creation, and the pressure it
+invites is already captured by the phase_sequence/score events that follow.
+Crediting the card directly would double-count that signal. A red is a bigger
+swing than a yellow, but it is a bigger swing *because* of the phases that
+follow it, which is exactly the thing already counted. This is a judgement
+call, not a derived fact -- revisit once there's real match data to validate
 against, the way the football model was validated against Flashscore.
 """
 
@@ -26,7 +28,8 @@ from .base import BaseSport, ChartProfile
 
 _WEIGHTS = json.loads((Path(__file__).parent / "rugby_weights.json").read_text())
 
-_SCORE_TYPES = ("try", "penalty_kick", "drop_goal")
+_SCORE_TYPES = ("try", "penalty_try", "penalty_kick", "drop_goal")
+_CARD_TYPES = ("sin_bin", "red_card")
 
 
 class RugbySport(BaseSport):
@@ -55,7 +58,7 @@ class RugbySport(BaseSport):
                     weight=self._territory_weight(ev),
                     category="pressure",
                 ))
-            elif etype == "sin_bin":
+            elif etype in _CARD_TYPES:
                 out.append(StandardEvent(
                     team=ev["team"],
                     t=ev["minute"],
@@ -84,10 +87,26 @@ class RugbySport(BaseSport):
         Rugby has no discrete "shot" event -- territory gained is the
         signal. Combines metres gained, how close the sequence ended to the
         try line, and whether it produced a linebreak.
+
+        How the possession BEGAN scales the result: an interception or a
+        penalty carries threat a scrum on halfway doesn't. Set pieces get no
+        weight of their own -- a lineout is not itself threat creation, it is
+        context for the possession it starts, and crediting it separately
+        would double-count that possession exactly the way crediting a card
+        directly would. The factors below are judgement calls, unvalidated
+        against real data, in the same way this module's decay_half_life and
+        card handling are -- tune them once real traced matches exist.
+
+        ev may also carry "start_metres_from_line" (where the possession
+        began). It is deliberately not weighted yet: end position already
+        drives territory_factor, and adding a second positional term without
+        reference data to fit it against would be inventing signal.
         """
         metres = ev.get("metres_gained", 0)
         end_m_from_line = ev.get("end_metres_from_line", 50)
         linebreaks = ev.get("linebreaks", 0)
+        origin = _WEIGHTS["origin_factor"].get(ev.get("start_reason"), 1.0)
         territory_factor = max(0.0, 1 - end_m_from_line / 100)
         base = 0.15 + 0.35 * min(metres / 40, 1.0)
-        return round((base + 0.3 * territory_factor) * (1 + 0.25 * linebreaks), 2)
+        return round((base + 0.3 * territory_factor)
+                     * (1 + 0.25 * linebreaks) * origin, 2)

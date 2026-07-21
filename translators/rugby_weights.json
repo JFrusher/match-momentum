@@ -1,10 +1,23 @@
 {
   "try": 2.0,
+  "penalty_try": 2.3,
   "conversion": 0.3,
   "conversion_missed": 0.0,
   "penalty_kick": 1.0,
   "drop_goal": 1.1,
   "turnover_won": 0.5,
+  "penalty_won": 0.6,
   "linebreak": 1.0,
-  "_default": 0.4
+  "_default": 0.4,
+  "origin_factor": {
+    "interception": 1.3,
+    "penalty": 1.25,
+    "lineout": 1.15,
+    "turnover_open": 1.1,
+    "scrum": 1.0,
+    "kick_return": 0.95,
+    "restart": 0.9,
+    "kickoff": 0.9,
+    "drop_out_22": 0.85
+  }
 }

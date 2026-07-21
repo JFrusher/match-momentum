@@ -9,7 +9,7 @@ from translators.rugby import RugbySport
 
 from tracer import config
 from tracer.continuity import PathPoint, PlayChain, PlayerTag, Segment
-from tracer.events import assign_teams, chain_to_events
+from tracer.events import assign_teams, chain_to_events, summarise
 from tracer.match_state import MatchState
 
 PX = config.PX_PER_M
@@ -97,14 +97,16 @@ def test_match_state_full_flow_trace_plus_taps():
     m.key_down("a", 102.6)    # authoritative chain end
     assert not m.recorder.active
     (ev,) = m.events
-    # 10m gained, ends 80m out, 1 linebreak:
-    # round((.15+.35*.25 + .3*.2)*1.25, 2) = 0.37
+    # 10m gained, ends 80m out, 1 linebreak, and it is the match's first
+    # possession so it starts from the kickoff (origin factor 0.9):
+    # round((.15+.35*.25 + .3*.2)*1.25*0.9, 2) = 0.33
     assert ev["metres_gained"] == 10.0
     assert ev["end_metres_from_line"] == 80.0
     assert ev["linebreaks"] == 1
+    assert ev["start_reason"] == "kickoff"
     assert ev["players"] == [{"number": 9, "role": "start"}]
     (std,) = RugbySport().translate([ev])
-    assert std.weight == 0.37
+    assert std.weight == 0.33
     # evidence capture: raw inputs + segmentation debug snapshot per chain
     assert m.chain_seq == 1
     assert m.last_chain is not None
@@ -123,6 +125,77 @@ def test_discrete_events_and_conversion_window():
     types = [(e["type"], e["team"]) for e in m.events]
     assert types == [("try", "ENG"), ("conversion", "ENG"),
                      ("turnover_won", "WAL"), ("sin_bin", "ENG")]
+
+
+# --- origin as context on the possession's weight --------------------------
+def test_origin_scales_the_territory_weight():
+    base = {"type": "phase_sequence", "team": "ENG", "minute": 5.0,
+            "metres_gained": 20.0, "end_metres_from_line": 40.0, "linebreaks": 0}
+    plain = RugbySport().translate([base])[0].weight
+    off_lineout = RugbySport().translate(
+        [{**base, "start_reason": "lineout"}])[0].weight
+    off_restart = RugbySport().translate(
+        [{**base, "start_reason": "restart"}])[0].weight
+    assert off_lineout > plain > off_restart
+
+
+def test_unknown_origin_leaves_the_weight_alone():
+    base = {"type": "phase_sequence", "team": "ENG", "minute": 5.0,
+            "metres_gained": 20.0, "end_metres_from_line": 40.0, "linebreaks": 0}
+    plain = RugbySport().translate([base])[0].weight
+    assert RugbySport().translate(
+        [{**base, "start_reason": "nonsense"}])[0].weight == plain
+
+
+def test_penalty_won_is_a_standalone_swing():
+    # a concrete weight, not just "> 0": _default would satisfy that and the
+    # whole point is that this type is declared rather than swallowed
+    (std,) = RugbySport().translate(
+        [{"type": config.PENALTY_WON_TYPE, "team": "ENG", "minute": 5.0}])
+    assert std.weight == 0.6
+
+
+# --- chain origin on the export --------------------------------------------
+def test_first_sub_chain_carries_the_origin_and_its_field_position():
+    chain = make_chain([seg("CARRY", 20, 34, 0.0, 2.0)], team="home")
+    evs = chain_to_events(chain, NAMES, attack_dir_home=1, start_reason="lineout")
+    assert evs[0]["start_reason"] == "lineout"
+    assert evs[0]["start_metres_from_line"] == 80.0
+
+
+def test_only_the_first_sub_chain_carries_the_origin():
+    # the kick splits possession; the second sub-chain's origin is already
+    # implied by the kick that created it
+    chain = make_chain([seg("KICK", 20, 60, 0.0, 1.0),
+                        seg("CARRY", 60, 70, 1.0, 3.0)], team="home")
+    evs = chain_to_events(chain, NAMES, attack_dir_home=1, start_reason="scrum")
+    assert evs[0]["start_reason"] == "scrum"
+    assert "start_reason" not in evs[1]
+
+
+def test_origin_is_omitted_when_there_is_none():
+    chain = make_chain([seg("CARRY", 20, 34, 0.0, 2.0)], team="home")
+    evs = chain_to_events(chain, NAMES, attack_dir_home=1)
+    assert "start_reason" not in evs[0]
+    assert evs[0]["start_metres_from_line"] == 80.0   # position is free either way
+
+
+# --- commit feedback -------------------------------------------------------
+def test_summary_names_team_action_sequence_and_metres():
+    evs = [{"type": "phase_sequence", "team": "ENG", "metres_gained": 12.0}]
+    assert summarise(evs, ["CARRY", "PASS"]) == "ENG · CARRY-PASS · 12m"
+
+
+def test_summary_sums_metres_across_an_intercepted_chain():
+    evs = [{"type": "phase_sequence", "team": "ENG", "metres_gained": 8.0},
+           {"type": "turnover_won", "team": "WAL"},
+           {"type": "phase_sequence", "team": "WAL", "metres_gained": 5.5}]
+    assert summarise(evs, ["CARRY", "PASS", "CARRY"]) == \
+        "ENG · CARRY-PASS-CARRY · 13.5m"
+
+
+def test_summary_of_nothing_is_empty():
+    assert summarise([], []) == ""
 
 
 def test_synthetic_match_round_trips_through_engine():

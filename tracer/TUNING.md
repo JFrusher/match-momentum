@@ -62,7 +62,16 @@ the veto stricter.
 Per class: `score = B_c + Σ W_c_FEATURE * feature`; **CARRY is the fixed
 reference class** (score 0 — no constants). Softmax gives probabilities;
 argmax wins (CARRY wins ties); `confidence = top prob - second prob` (dev
-panel only). **KICK is geometry-only**: `W_KICK_DIST` dominates (distance is
+panel only).
+
+> **Read `confidence` as a diagnostic, never as certainty.** Because CARRY
+> scores a flat 0, a textbook carry wins only by PASS's bias (`B_PASS = -0.2`)
+> and reports a 0.09 margin, while a genuinely borderline 30m stroke reports
+> 0.138. The number tracks the bias constant, not doubt, so it ranks the
+> safest calls below the ambiguous ones. Shading the canvas by it was tried
+> and removed for exactly this reason. It is useful only next to the feature
+> table that explains where the score came from.
+ **KICK is geometry-only**: `W_KICK_DIST` dominates (distance is
 the necessary signal), `straight` modulates. The kick threshold sits ~27m
 (`B_KICK`/`W_KICK_DIST`/`F_DIST_SCALE_M`); 20-30m strokes are ambiguous and
 lean **CARRY** (a false kick wrongly flips possession — the K hint or Review

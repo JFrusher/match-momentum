@@ -6,6 +6,8 @@ a bad event. Edits mutate match.events in place; autosave picks them up.
 
 from nicegui import ui
 
+from . import config
+
 
 def _players_str(ev) -> str:
     return ",".join(f"{p['number']}:{p['role']}" for p in ev.get("players", []))
@@ -33,6 +35,11 @@ def open_review(match):
         ev["team"] = names[1] if ev["team"] == names[0] else names[0]
         touched()
 
+    def set_type(ev, etype):
+        ev["type"] = etype
+        ev.pop("label", None)   # the old label names the old score
+        touched()
+
     def set_players(ev, text):
         players = _parse_players(text)
         if players:
@@ -52,7 +59,14 @@ def open_review(match):
                 with ui.row().classes("items-center gap-2 w-full"):
                     ui.label(f"{ev['minute']:g}'").classes("w-10 font-mono")
                     ui.button(ev["team"], on_click=lambda e=ev: swap(e)).props("flat dense")
-                    ui.label(ev["type"]).classes("w-32")
+                    if ev["type"] in config.POINTS:
+                        # a mis-tapped T instead of N is the common correction,
+                        # and it is worth 5 points against the wrong column
+                        ui.select(sorted(config.POINTS), value=ev["type"],
+                                  on_change=lambda e, ev=ev: set_type(ev, e.value)
+                                  ).props("dense options-dense borderless").classes("w-32")
+                    else:
+                        ui.label(ev["type"]).classes("w-32")
                     if ev["type"] == "phase_sequence":
                         ui.number("m gained", min=0, step=0.5).bind_value(
                             ev, "metres_gained").classes("w-24")

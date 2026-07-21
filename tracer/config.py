@@ -88,3 +88,9 @@ DISCRETE_EVENT_KEYS = {
     "b": "sin_bin",
 }
 CONVERSION_KEYS = {"c": "conversion", "m": "conversion_missed"}
+
+# --- scoring (rugby union point values) -----------------------------------
+# ponytail: union only; swap this map for another code's values if needed.
+# penalty_kick counts as a penalty GOAL (3); a penalty kicked to touch isn't
+# a penalty_kick event, so it scores nothing here.
+POINTS = {"try": 5, "conversion": 2, "penalty_kick": 3, "drop_goal": 3}

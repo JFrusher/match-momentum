@@ -11,7 +11,13 @@ forced error).
 _territory_weight() stay the single source of truth.
 """
 
+from . import config
 from .geometry import PitchCalibration
+
+# Score types that end a possession and trigger a restart (scoring team
+# receives). Conversions follow a try by the same team, so they don't
+# independently determine the next possessor.
+RESTART_SCORE_TYPES = ("try", "penalty_kick", "drop_goal")
 
 
 def _other(team):
@@ -26,6 +32,36 @@ def assign_teams(segments, start_team: str) -> str:
         if seg.action == "KICK" or (seg.action == "PASS" and seg.intercepted):
             team = _other(team)
     return team
+
+
+def infer_next_possession(chain_start_team: str, final_team: str,
+                          scored_team) -> str:
+    """Who has the ball for the NEXT chain, given how this one ended.
+
+    - a score -> the scoring team receives the restart;
+    - a kick/interception already flipped possession in-chain (final_team);
+    - otherwise the possession was lost at the breakdown (knock-on / scrum /
+      jackal = the coarse "turnover"), so it goes to the other side.
+    ponytail: plain-end assumes possession lost; tap Z/X if it was retained
+    (e.g. penalty won and played on).
+    """
+    if scored_team:
+        return scored_team
+    if final_team != chain_start_team:
+        return final_team
+    return _other(chain_start_team)
+
+
+def compute_score(events, team_names: dict) -> dict:
+    """Sum point-scoring events into {"home": int, "away": int}."""
+    score = {"home": 0, "away": 0}
+    name_to_key = {v: k for k, v in team_names.items()}
+    for e in events:
+        pts = config.POINTS.get(e.get("type"))
+        key = name_to_key.get(e.get("team"))
+        if pts and key:
+            score[key] += pts
+    return score
 
 
 def chain_to_events(chain, team_names: dict, attack_dir_home: int,

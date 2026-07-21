@@ -15,11 +15,14 @@ from nicegui import ui
 from . import autosave
 from .canvas import TraceCanvas
 from .devpanel import build_dev_panel
+from .events import compute_score
 from .export import export_json
 from .review import open_review
 from .setup import setup_form
 
 DIR_ARROWS = {1: "→", -1: "←"}
+REASON_TEXT = {"kick": "won on kick", "turnover": "won on turnover",
+               "score": "restart"}
 DEV_CLI = "dev" in sys.argv[1:]  # for the native window, where ?dev=1 is unreachable
 
 
@@ -53,6 +56,7 @@ def index(dev: bool = False):  # ?dev=1 enables the dev drawer
             with ui.row().classes("items-center gap-4"):
                 clock_lbl = ui.label("00:00").classes("text-3xl font-mono")
                 clock_btn = ui.button(icon="play_arrow", on_click=m.clock.toggle)
+                score_lbl = ui.label().classes("text-2xl font-mono")
                 status_lbl = ui.label().classes("text-lg")
                 ui.button("Halftime flip", on_click=m.halftime_flip).props("outline")
                 ui.button("Review", on_click=lambda: open_review(m)).props("outline")
@@ -78,9 +82,14 @@ def index(dev: bool = False):  # ?dev=1 enables the dev drawer
             secs = int(m.clock.seconds())
             clock_lbl.text = f"{secs // 60:02d}:{secs % 60:02d}"
             clock_btn.props(f'icon={"pause" if m.clock.running else "play_arrow"}')
-            arrow = DIR_ARROWS[m.attack_dir_home]
-            status_lbl.text = (f"{m.team_names[m.possession]} in possession · "
-                               f"home attacks {arrow} · {len(m.events)} events")
+            score = compute_score(m.events, m.team_names)
+            score_lbl.text = (f"{m.team_names['home']} {score['home']}"
+                              f" – {score['away']} {m.team_names['away']}")
+            poss_dir = m.attack_dir_home if m.possession == "home" else -m.attack_dir_home
+            reason = REASON_TEXT.get(m.last_end_reason)
+            status_lbl.text = (f"{m.team_names[m.possession]} {DIR_ARROWS[poss_dir]}"
+                               + (f" · {reason}" if reason else "")
+                               + f" · {len(m.events)} events")
 
         m.on_commit = lambda chain: canvas.render_segments(chain.segments)
         m.on_change = lambda: (save_now(), refresh())
@@ -91,7 +100,8 @@ def index(dev: bool = False):  # ?dev=1 enables the dev drawer
             ui.timer(5.0, save_now)  # plus save-on-commit via on_change
         refresh()
         if dev or DEV_CLI:
-            build_dev_panel(m)
+            with root:  # a live slot; the drawer/layout top-level rule doesn't apply
+                build_dev_panel(m)
 
     def begin(match):
         build_match_ui(match)

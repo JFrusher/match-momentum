@@ -7,3 +7,5 @@ tracer/sessions/
 tracer/dev_traces/
 legacy/tagger/node_modules/
 legacy/tagger/dist/
+.playwright-mcp/
+.pytest_cache/

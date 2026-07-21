@@ -152,7 +152,8 @@ _sc("mirrored_attack", attack_dir=-1,
     expect={"actions": ["CARRY", "PASS", "CARRY"]})
 _sc("away_possession_chain", possession="away",
     waypoints=((60, 35), (48, 35)), durations=(3.0,),
-    expect={"actions": ["CARRY"], "possession_after": "away"})
+    # plain carry-end = possession lost at the breakdown -> other side
+    expect={"actions": ["CARRY"], "possession_after": "home"})
 
 # taps & keys: digits, hints, linebreak, interception
 _sc("digit_start_actor", **CS, taps=((0.15, "9"),),
@@ -187,12 +188,14 @@ _sc("shift_intercept_pass", **CPC, shift=((2.55, 2.90),),
     expect={"intercepted": [1], "possession_after": "away",
             "event_types": ["phase_sequence", "phase_sequence", "turnover_won"]})
 _sc("shift_during_carry_only", **CPC, shift=((0.5, 1.5),),
-    expect={"intercepted": [], "possession_after": "home"})
+    # no interception, so it's a plain carry/pass chain -> possession lost
+    expect={"intercepted": [], "possession_after": "away"})
 
 # state-level: possession keys, kick flips, discrete events, fallback end
 _sc("team_key_then_chain", taps=((-0.2, "x"),),       # X tapped before the trace
     waypoints=((60, 35), (48, 35)), durations=(3.0,),
-    expect={"actions": ["CARRY"], "possession_after": "away"})
+    # X sets away in possession; the carry then ends and hands it back to home
+    expect={"actions": ["CARRY"], "possession_after": "home"})
 _sc("kick_flips_possession", waypoints=((10, 35), (20, 35), (60, 35)),
     durations=(2.5, 0.5),
     expect={"actions": ["CARRY", "KICK"], "possession_after": "away",
@@ -200,8 +203,9 @@ _sc("kick_flips_possession", waypoints=((10, 35), (20, 35), (60, 35)),
 _sc("kick_tennis",
     waypoints=((30, 35), (62, 35), (57, 35), (25, 34), (30, 34)),
     durations=(0.5, 1.2, 0.5, 1.5),                   # kick, return, kick back
+    # two kicks land the ball back with home, whose trailing carry then ends
     expect={"actions": ["KICK", "CARRY", "KICK", "CARRY"],
-            "possession_after": "home",
+            "possession_after": "away",
             "event_types": ["phase_sequence"] * 3})
 _sc("discrete_try_conversion", taps=((0.0, "t"), (5.0, "c")),
     expect={"event_types": ["try", "conversion"]})

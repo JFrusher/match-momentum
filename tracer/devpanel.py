@@ -96,10 +96,17 @@ def _trace_files():
 
 
 def build_dev_panel(match):
-    """Right drawer: replay controls + rolling evidence log."""
+    """Inline evidence log + replay controls, under the canvas.
+
+    Not a ui.right_drawer: layout drawers must be created in the page's
+    top-level slot, but the whole match UI is built lazily inside the
+    setup-form click handler (root.clear() deleted that slot), so a drawer
+    raises 'parent element ... has been deleted'. An expansion is a normal
+    element and lives happily inside root.
+    """
     options = sorted(fixtures.SCENARIOS) + _trace_files()
-    with ui.right_drawer(value=True, fixed=True).props("width=560 bordered"):
-        ui.label("Live Trace dev").classes("text-lg font-bold")
+    with ui.expansion("Live Trace dev", value=True).classes("w-full") \
+            .props("header-class=text-lg font-bold"):
         with ui.row().classes("items-center gap-2 w-full"):
             sel = ui.select(options, value=options[0], label="fixture") \
                 .classes("grow")

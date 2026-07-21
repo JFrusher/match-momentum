@@ -9,7 +9,8 @@ from typing import Optional
 
 from . import config, segmentation
 from .continuity import ChainRecorder, PlayChain, new_chain_id
-from .events import assign_teams, chain_to_events
+from .events import (assign_teams, chain_to_events, infer_next_possession,
+                     RESTART_SCORE_TYPES)
 from .geometry import PitchCalibration
 from .keystate import KeyState
 from .segmentation import apply_taps, segment_path
@@ -62,6 +63,8 @@ class MatchState:
         self.recorder = ChainRecorder()
         self.events: list[dict] = []
         self._chain_start_minute: Optional[float] = None
+        self._chain_events_start = 0   # len(events) at chain start, for score detection
+        self.last_end_reason: Optional[str] = None  # "kick"/"turnover"/"score"
         self._pending_try = None  # (team_key, deadline_monotonic)
         self.on_commit = None     # callback(chain) after a chain is committed
         self.on_change = None     # callback() after any state change
@@ -75,6 +78,7 @@ class MatchState:
     def mouse_down(self, x, y, t):
         self.recorder.start(x, y, t)
         self._chain_start_minute = self.clock.minute(t)
+        self._chain_events_start = len(self.events)
 
     def mouse_move(self, x, y, t):
         self.recorder.extend(x, y, t)
@@ -131,13 +135,27 @@ class MatchState:
             segments=segments,
         )
         self.last_chain = chain
-        self.possession = assign_teams(segments, chain.team)
+        final_team = assign_teams(segments, chain.team)
+        scored_team = self._scored_team_this_chain()
+        self.possession = infer_next_possession(chain.team, final_team, scored_team)
+        self.last_end_reason = ("score" if scored_team
+                                else "kick" if segments[-1].action == "KICK"
+                                else "turnover")
         self.events.extend(chain_to_events(
             chain, self.team_names, self.attack_dir_home, self.cal))
         self._changed()
         if self.on_commit:
             self.on_commit(chain)
         return chain
+
+    def _scored_team_this_chain(self) -> Optional[str]:
+        """Home/away key if a restart-triggering score was tapped this chain."""
+        name_to_key = {v: k for k, v in self.team_names.items()}
+        found = None
+        for e in self.events[self._chain_events_start:]:
+            if e.get("type") in RESTART_SCORE_TYPES:
+                found = name_to_key.get(e.get("team"))
+        return found
 
     # --- discrete events -----------------------------------------------------
     def _discrete_event(self, k: str, t: float):

@@ -68,6 +68,20 @@ class PitchCalibration:
         """Which half of the pitch — i.e. which end's in-goal this point is at."""
         return self.field_x_m(x_px) < config.PITCH_LENGTH_M / 2
 
+    def goal_line_px(self, attack_dir: int) -> float:
+        """x of the try line a team attacking this way is kicking at."""
+        return (self.left_try_line_px + config.PITCH_LENGTH_M * self.px_per_m
+                if attack_dir > 0 else self.left_try_line_px)
+
+    def between_posts(self, y_px: float) -> bool:
+        """Is this y within the posts — the width test for a kick at goal?
+
+        Height over the bar is invisible in a top-down trace, so a line whose
+        crossing of the goal line falls between the uprights is taken as good.
+        """
+        half = config.GOAL_WIDTH_M / 2 * self.px_per_m
+        return abs(y_px - self.width_px / 2) <= half
+
     def own_in_goal(self, x_px: float, attack_dir: int) -> bool:
         """Is this the in-goal a team attacking this way is defending?"""
         return self.is_left_end(x_px) == (attack_dir > 0)

@@ -12,8 +12,8 @@ from . import config, segmentation
 from .continuity import ChainRecorder, PlayChain, new_chain_id
 from .events import (actor, assign_teams, chain_to_actions, chain_to_events,
                      ChainOrigin, default_in_goal_outcome, halfway_mark,
-                     in_goal_defender, infer_origin, set_piece_record,
-                     summarise, RESTART_SCORE_TYPES)
+                     in_goal_defender, infer_origin, penalty_at_goal_scored,
+                     set_piece_record, summarise, RESTART_SCORE_TYPES)
 from .geometry import PitchCalibration
 from .keystate import KeyState
 from .segmentation import apply_taps, segment_path
@@ -105,19 +105,21 @@ class MatchState:
     # --- mouse -----------------------------------------------------------
     def mouse_down(self, x, y, t):
         """Begin a chain. Returns the point actually recorded, which the canvas
-        draws from — a snapped restart must not leave the line and the data
-        disagreeing about where the kick was taken.
+        draws from — a snapped start must not leave the line and the data
+        disagreeing about where the play began.
 
-        A restart is taken from the centre spot, so the whole path is shifted
-        onto it rather than only its first point: moving the start alone would
-        turn the gap between the spot and a sloppy press into a leg of its own,
-        and that leg would become the kick.
+        The new possession begins at the mark the last one left (a lineout, a
+        scrum, the spot a turnover happened, the centre spot for a restart), so
+        the whole path is shifted onto it rather than only its first point:
+        moving the start alone would turn the gap between the mark and a sloppy
+        press into a leg of its own, and that leg would become a phantom action.
         """
         self._snap = (0.0, 0.0)
-        if self.pending_start_reason in config.CENTRE_SPOT_REASONS:
-            cx, cy = halfway_mark(self.cal)
-            self._snap = (cx - x, cy - y)
-            x, y = cx, cy
+        mark = self._start_mark()
+        if mark is not None:
+            mx, my = mark
+            self._snap = (mx - x, my - y)
+            x, y = mx, my
         self.recorder.start(x, y, t)
         self._chain_start_minute = self.clock.minute(t)
         self._chain_events_start = len(self.events)
@@ -129,6 +131,20 @@ class MatchState:
                       self.last_end_reason, self._pending_try,
                       self.pending_start_reason, self.armed_next_action)
         return x, y
+
+    def _start_mark(self):
+        """Where the pending possession begins, or None to press free-hand.
+
+        Every inferred origin already carries the mark its chip is drawn at, so
+        the next trace snaps onto it. The initial kickoff has no origin yet, so
+        a centre-spot reason falls back to halfway.
+        """
+        o = self.last_origin
+        if o is not None and o.mark is not None:
+            return o.mark
+        if self.pending_start_reason in config.CENTRE_SPOT_REASONS:
+            return halfway_mark(self.cal)
+        return None
 
     def mouse_move(self, x, y, t):
         """Returns the recorded point, which the canvas draws (see mouse_down)."""
@@ -196,7 +212,8 @@ class MatchState:
                          "attack_dir_home": self.attack_dir_home}
         attack_dir = (self.attack_dir_home if self.possession == "home"
                       else -self.attack_dir_home)
-        force = ("KICK" if self.pending_start_reason in config.CENTRE_SPOT_REASONS
+        force = ("KICK" if self.pending_start_reason in config.KICK_START_REASONS
+                 or self.armed_next_action in config.KICK_ARMED_ACTIONS
                  else None)
         segments = segment_path(points, attack_dir, force_first=force)
         self.last_debug = segmentation.last_debug  # by ref; apply_taps appends
@@ -232,6 +249,7 @@ class MatchState:
                            self.last_end_reason, self._pending_try,
                            self.pending_start_reason, self.armed_next_action)
         final_team = assign_teams(segments, chain.team)
+        at_goal = self.armed_next_action == "kick_at_goal"
         scored_team = self._scored_team_this_chain()
         # a trace that finished over a try line: the geometry guesses, the
         # chip's chooser overrides. A try is expressed as a scored_team, so
@@ -239,7 +257,16 @@ class MatchState:
         # path the T tap already takes. A tapped score outranks all of it, and
         # hides the chooser rather than offering a control that can't win.
         self.in_goal_choice = None
-        if not scored_team:
+        if at_goal:
+            # a kick at goal is judged by the posts, not by grounding: no
+            # try/held-up chooser, and a line through the uprights is the score
+            kick = segments[0]
+            kick_dir = (self.attack_dir_home if kick.team == "home"
+                        else -self.attack_dir_home)
+            if not scored_team and penalty_at_goal_scored(kick, kick_dir, self.cal):
+                self._log_penalty_kick(kick.team, kick.end_t)
+                scored_team = kick.team
+        elif not scored_team:
             self.in_goal_choice = self._in_goal_override or default_in_goal_outcome(
                 segments, self.attack_dir_home, self.cal)
         try_team = None
@@ -408,10 +435,15 @@ class MatchState:
         self._changed()
 
     def choose_penalty_option(self, option: str):
-        """Non-blocking: ignoring the chooser leaves the default guess standing."""
+        """Non-blocking: ignoring the chooser leaves the default guess standing.
+
+        to-touch and at-goal both arm a kick, so the next stroke is forced to
+        KICK (segment force in end_chain); at-goal also lets _commit_chain judge
+        the kick against the posts instead of offering a grounding chooser.
+        """
         self.penalty_option = option
-        self.armed_next_action = ("kick_to_touch" if option == "kick_to_touch"
-                                  else None)
+        armed = {"kick_to_touch": "kick_to_touch", "at_goal": "kick_at_goal"}
+        self.armed_next_action = armed.get(option)
         if option == "scrum":
             self.pending_start_reason = "scrum"
         self._changed()
@@ -464,6 +496,14 @@ class MatchState:
             ev["assist"] = assist
         self.events.append(ev)
         self._pending_try = (team_key, t + config.CONVERSION_LISTEN_S)
+
+    def _log_penalty_kick(self, team_key: str, t: float):
+        """A kick at goal that crossed between the posts. Scores 3 like the
+        N-tapped penalty_kick, and restarts play like any goal."""
+        minute = round(self.clock.minute(t), 1)
+        name = self.team_names[team_key]
+        self.events.append({"type": "penalty_kick", "team": name,
+                            "minute": minute, "label": f"{name} penalty {int(minute)}'"})
 
     # --- discrete events -----------------------------------------------------
     def _discrete_event(self, k: str, t: float):

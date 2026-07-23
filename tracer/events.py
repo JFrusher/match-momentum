@@ -152,6 +152,25 @@ def _lineout(last, end, team, chain_start_team, armed, attack_dir_home,
     return ChainOrigin("lineout", team, (mark_x, end.y), (alt_x, end.y))
 
 
+def penalty_at_goal_scored(last_seg, attack_dir: int,
+                           cal: PitchCalibration = PitchCalibration()) -> bool:
+    """Did an at-goal penalty kick pass between the posts?
+
+    Rugby is three-dimensional and a top-down trace is not, so this reads only
+    the horizontal line: where the ball's ground track crosses the goal line,
+    and whether that crossing is between the uprights. A line drawn through the
+    posts is a successful kick — the analyst draws it that way on purpose. A
+    kick that never reaches the line (falls short) or crosses wide is a miss.
+    """
+    gx = cal.goal_line_px(attack_dir)
+    pts = last_seg.points
+    for a, b in zip(pts, pts[1:]):
+        if (a.x - gx) * (b.x - gx) <= 0 and a.x != b.x:
+            f = (gx - a.x) / (b.x - a.x)
+            return cal.between_posts(a.y + f * (b.y - a.y))
+    return False
+
+
 def halfway_mark(cal: PitchCalibration) -> tuple:
     """Centre spot — where a kickoff or a restart is taken."""
     return (cal.left_try_line_px + config.PITCH_LENGTH_M / 2 * cal.px_per_m,

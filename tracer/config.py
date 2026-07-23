@@ -11,6 +11,8 @@ PX_PER_M = 8                # fixed 1:1 scale, no responsive resize (MVP)
 PITCH_LENGTH_M = 100        # try line to try line
 PITCH_WIDTH_M = 70
 IN_GOAL_DEPTH_M = 10
+GOAL_WIDTH_M = 5.6          # gap between the posts, centred on the pitch width;
+                            # decides whether an at-goal penalty kick went over
 TWENTY_TWO_M = 22           # the 22 line, which decides the kick-to-touch law
 TOUCH_MARGIN_M = 2.0        # a trace finishing this close to a touchline counts
                             # as out: the browser stops reporting mousemove once
@@ -112,11 +114,19 @@ START_REASONS = ("kickoff", "restart", "drop_out_22", "scrum", "lineout",
 # segment is a KICK whatever its shape — a restart tapped short would
 # otherwise read as a carry and hand the ball to the wrong side.
 CENTRE_SPOT_REASONS = ("kickoff", "restart")
+# Reasons whose first stroke is inherently a drop kick, so it is forced to KICK
+# however it was drawn (a short 22 drop-out would otherwise read as a carry).
+# Superset of CENTRE_SPOT_REASONS: those two snap to halfway as well, this only
+# forces the class. drop_out_22 has its own mark, so it snaps to that instead.
+KICK_START_REASONS = ("kickoff", "restart", "drop_out_22")
 CHIP_CLEARANCE_M = 9        # how far a chip sits off a mark you must press on
 TAPPED_START_REASONS = {"s": "scrum", "f": "penalty"}
 PENALTY_WON_TYPE = "penalty_won"   # the discrete event an F tap also logs
 PENALTY_OPTIONS = ("kick_to_touch", "at_goal", "tap_and_go", "scrum")
 PENALTY_DEFAULT_OPTION = "kick_to_touch"
+# Penalty options whose ensuing stroke is a kick: picking one forces the next
+# segment to KICK (a penalty to touch / at goal is a kick, not open play).
+KICK_ARMED_ACTIONS = ("kick_to_touch", "kick_at_goal")
 # What a trace ending over a try line meant. Grounding is the one thing a line
 # genuinely cannot show, so this is a chooser like the penalty options: the
 # geometry picks the likely one, ignoring the chip accepts it.

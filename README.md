@@ -1,6 +1,6 @@
-# Match Momentum
+# Phase Trace
 
-[![tests](https://github.com/Jfrusher/match-momentum/actions/workflows/tests.yml/badge.svg)](https://github.com/Jfrusher/match-momentum/actions/workflows/tests.yml)
+[![tests](https://github.com/Jfrusher/phase-trace/actions/workflows/tests.yml/badge.svg)](https://github.com/Jfrusher/phase-trace/actions/workflows/tests.yml)
 
 **Trace a rugby match with your mouse, get a broadcast-style momentum chart out of it.**
 
@@ -37,12 +37,12 @@ python momentum.py examples/events_arg_egy.json out.png --sport football
 The mechanic, the full hotkey table and the tuning workflow are in [tracer/README.md](tracer/README.md). The short version:
 
 - Hold the mouse button when a possession starts and follow the ball. Pass, run, pass, tackle are all one line.
-- Tap `A` or `Space` when the play dies. That, not letting go of the button, is what ends the chain.
+- Tap `A` or `Space` when the play dies. That, not letting go of the button, is what ends the chain. Drawing the ball out of play ends it for you, since in law it is over.
 - The line redraws colour-coded by inferred action while you go, so you can see what the recognizer thinks.
 
 The recognizer only looks at the shape of the line, never at how fast you drew it. That was deliberate: I wanted to trace off paused or scrubbed video and get the same answer as tracing live. [`tracer/tests/test_pace_invariance.py`](tracer/tests/test_pace_invariance.py) exists to stop that quietly breaking.
 
-Possessions also record how they started (scrum, lineout, penalty, restart, turnover, interception), because in rugby that's a fair chunk of what a possession is worth. Most of it comes off the trace: a kick that ends at the touchline is a lineout, and the kick-to-touch-on-the-full law says where that lineout gets taken. Scrums and penalties are the two a line can't show you, so those are single taps. Whatever gets inferred turns up as a chip on the pitch, and the chip is also how you correct it. With only two teams to pick from, a wrong guess is one click from right.
+Possessions also record how they started (scrum, lineout, penalty, restart, turnover, interception, 22 drop-out), because in rugby that's a fair chunk of what a possession is worth. Most of it comes off the trace: a line crossing the touchline is a lineout, and the kick-to-touch-on-the-full law says where that lineout gets taken. What a line can't show you is a scrum, a penalty, and whether the ball was grounded in the in-goal — the first two are single taps, and the third is a chooser on the chip with the likely answer already picked. Whatever gets inferred turns up as a chip on the pitch, and the chip is also how you correct it. With only two teams to pick from, a wrong guess is one click from right.
 
 ## The momentum model
 
@@ -79,7 +79,7 @@ To add a data provider (Opta, StatsBomb, whatever else), implement `BaseDataSour
 
 ## Tests
 
-225 tests, run on every push and pull request:
+256 tests, run on every push and pull request:
 
 ```bash
 python -m pytest -q

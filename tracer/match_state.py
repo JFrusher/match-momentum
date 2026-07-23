@@ -4,12 +4,15 @@ app.py wires UI events in and reads state back; optional callbacks
 (on_commit, on_change) let the UI react without this module importing it.
 """
 
+import math
 import time
 from typing import Optional
 
 from . import config, segmentation
 from .continuity import ChainRecorder, PlayChain, new_chain_id
-from .events import (assign_teams, chain_to_events, ChainOrigin, infer_origin,
+from .events import (actor, assign_teams, chain_to_actions, chain_to_events,
+                     ChainOrigin, default_in_goal_outcome, halfway_mark,
+                     in_goal_defender, infer_origin, set_piece_record,
                      summarise, RESTART_SCORE_TYPES)
 from .geometry import PitchCalibration
 from .keystate import KeyState
@@ -54,16 +57,23 @@ class MatchClock:
 class MatchState:
     def __init__(self, home: str, away: str, attack_dir_home: int = 1,
                  possession: str = "home", cal: Optional[PitchCalibration] = None,
-                 team_colors: Optional[dict] = None):
+                 team_colors: Optional[dict] = None, date: str = "",
+                 competition: str = ""):
         self.team_names = {"home": home, "away": away}
         self.team_colors = dict(team_colors or config.TEAM_COLORS)
+        self.date = date              # self-describing metadata for the export
+        self.competition = competition
         self.possession = possession
+        self.kickoff_team = possession   # who kicked off; the other side does H2
         self.attack_dir_home = attack_dir_home
         self.cal = cal or PitchCalibration()
         self.clock = MatchClock()
         self.keystate = KeyState()
         self.recorder = ChainRecorder()
         self.events: list[dict] = []
+        # rich per-action stream for the raw export, kept separate from
+        # self.events so nothing new can break the validated momentum path
+        self.actions: list[dict] = []
         self._chain_start_minute: Optional[float] = None
         self._chain_events_start = 0   # len(events) at chain start, for score detection
         self.last_end_reason: Optional[str] = None  # "kick"/"turnover"/"score"
@@ -78,6 +88,11 @@ class MatchState:
         self.armed_next_action = None
         self.last_origin = None   # ChainOrigin for the chip the UI draws
         self.penalty_option = None
+        self.penalty_reason = None   # chooser pick for the last penalty won
+        self._last_penalty = None    # the penalty_won event a reason attaches to
+        self.in_goal_choice = None   # what the last chain's in-goal end meant
+        self._in_goal_override = None  # the chooser's pick, cleared per chain
+        self._snap = (0.0, 0.0)   # path shift onto the centre spot, per chain
         self._chain_start_team = possession
         self.on_commit = None     # callback(chain) after a chain is committed
         self.on_change = None     # callback() after any state change
@@ -89,6 +104,20 @@ class MatchState:
 
     # --- mouse -----------------------------------------------------------
     def mouse_down(self, x, y, t):
+        """Begin a chain. Returns the point actually recorded, which the canvas
+        draws from — a snapped restart must not leave the line and the data
+        disagreeing about where the kick was taken.
+
+        A restart is taken from the centre spot, so the whole path is shifted
+        onto it rather than only its first point: moving the start alone would
+        turn the gap between the spot and a sloppy press into a leg of its own,
+        and that leg would become the kick.
+        """
+        self._snap = (0.0, 0.0)
+        if self.pending_start_reason in config.CENTRE_SPOT_REASONS:
+            cx, cy = halfway_mark(self.cal)
+            self._snap = (cx - x, cy - y)
+            x, y = cx, cy
         self.recorder.start(x, y, t)
         self._chain_start_minute = self.clock.minute(t)
         self._chain_events_start = len(self.events)
@@ -96,12 +125,33 @@ class MatchState:
         # snapshot here, not in end_chain: taps landing mid-trace (a try, a
         # turnover) already mutated events and possession by the time the
         # chain commits, and undo has to take those back too
-        self._undo = (len(self.events), self.possession, self.last_end_reason,
-                      self._pending_try, self.pending_start_reason,
-                      self.armed_next_action)
+        self._undo = (len(self.events), len(self.actions), self.possession,
+                      self.last_end_reason, self._pending_try,
+                      self.pending_start_reason, self.armed_next_action)
+        return x, y
 
     def mouse_move(self, x, y, t):
+        """Returns the recorded point, which the canvas draws (see mouse_down)."""
+        x, y = x + self._snap[0], y + self._snap[1]
         self.recorder.extend(x, y, t)
+        if self.recorder.active and self._left_field(x, y):
+            self.end_chain(t)   # ball out of play: the play is over, in law
+        return x, y
+
+    def _left_field(self, x, y) -> bool:
+        """Has the ball just gone out of play — touch, or the dead-ball line?
+
+        Guarded by the same displacement segment_path() rejects on, so a trace
+        started on a line cannot end itself before it has drawn anything.
+        Proximity is deliberately not enough here: a winger runs inside the
+        touch margin all game without going out.
+        """
+        pts = self.recorder.points
+        if len(pts) < 3:
+            return False
+        if math.hypot(x - pts[0].x, y - pts[0].y) < config.MIN_MOVEMENT_PX:
+            return False
+        return self.cal.crossed_touch(y) or self.cal.crossed_dead_ball(x)
 
     def mouse_up(self, t):
         """Fallback chain-end: primary flow is the A/Space tap."""
@@ -123,6 +173,8 @@ class MatchState:
             self._discrete_event(k, t)
         elif k in config.CONVERSION_KEYS:
             self._conversion(k, t)
+        elif k in config.ERROR_KEYS:
+            self._log_error(k, t)
         else:
             self.keystate.key_down(key, t)
 
@@ -132,6 +184,7 @@ class MatchState:
     # --- chain lifecycle ---------------------------------------------------
     def end_chain(self, t: float) -> Optional[PlayChain]:
         points = self.recorder.finish()
+        self._in_goal_override = None   # a chooser pick never outlives its chain
         taps = list(self.keystate.taps)
         intervals = self.keystate.intervals_until(t)
         self.keystate.clear_chain()
@@ -143,7 +196,9 @@ class MatchState:
                          "attack_dir_home": self.attack_dir_home}
         attack_dir = (self.attack_dir_home if self.possession == "home"
                       else -self.attack_dir_home)
-        segments = segment_path(points, attack_dir)
+        force = ("KICK" if self.pending_start_reason in config.CENTRE_SPOT_REASONS
+                 else None)
+        segments = segment_path(points, attack_dir, force_first=force)
         self.last_debug = segmentation.last_debug  # by ref; apply_taps appends
         if not segments:
             self.last_chain = None
@@ -173,18 +228,31 @@ class MatchState:
         # via a CLICK, which is itself a mouse_down and overwrites that
         # snapshot with the post-commit state before the handler runs.
         self._precommit = (self._chain_events_start, len(self.events),
-                           self.possession, self.last_end_reason,
-                           self._pending_try, self.pending_start_reason,
-                           self.armed_next_action)
+                           len(self.actions), self.possession,
+                           self.last_end_reason, self._pending_try,
+                           self.pending_start_reason, self.armed_next_action)
         final_team = assign_teams(segments, chain.team)
         scored_team = self._scored_team_this_chain()
+        # a trace that finished over a try line: the geometry guesses, the
+        # chip's chooser overrides. A try is expressed as a scored_team, so
+        # everything downstream (score, restart, conversion listener) is the
+        # path the T tap already takes. A tapped score outranks all of it, and
+        # hides the chooser rather than offering a control that can't win.
+        self.in_goal_choice = None
+        if not scored_team:
+            self.in_goal_choice = self._in_goal_override or default_in_goal_outcome(
+                segments, self.attack_dir_home, self.cal)
+        try_team = None
+        if self.in_goal_choice == "try":
+            scored_team = try_team = self._in_goal_attacker(segments)
         # the reason this chain BEGAN was decided when the last one ended;
         # capture it before inference overwrites it with the next one
         began_as = self.pending_start_reason
         origin = infer_origin(segments=segments, chain_start_team=chain.team,
                               final_team=final_team, scored_team=scored_team,
                               armed=self.armed_next_action,
-                              attack_dir_home=self.attack_dir_home, cal=self.cal)
+                              attack_dir_home=self.attack_dir_home, cal=self.cal,
+                              in_goal_outcome=self.in_goal_choice)
         self.possession = origin.team
         self.pending_start_reason = origin.reason
         self.last_origin = origin
@@ -196,6 +264,19 @@ class MatchState:
             chain, self.team_names, self.attack_dir_home, self.cal,
             start_reason=began_as)
         self.events.extend(new_events)
+        self.actions.extend(chain_to_actions(
+            chain, self.team_names, self.attack_dir_home, self.cal))
+        # a chain that BEGAN at a set piece records its outcome: the awarded
+        # team (possession at mouse_down) fed it; chain.team came away with it
+        sp = set_piece_record(began_as, self._chain_start_team, chain.team,
+                              self.team_names, chain.start_minute)
+        if sp:
+            self.actions.append(sp)
+        if try_team:
+            last = segments[-1]
+            prev = segments[-2] if len(segments) >= 2 else None
+            assist = actor(prev) if prev and prev.action == "PASS" else None
+            self._log_try(try_team, last.end_t, player=actor(last), assist=assist)
         self.last_summary = summarise(new_events, [s.action for s in segments])
         self._changed()
         if self.on_commit:
@@ -214,10 +295,27 @@ class MatchState:
         order = ("CARRY", "PASS", "KICK")
         seg = chain.segments[i]
         seg.action = order[(order.index(seg.action) + 1) % len(order)]
-        (self._chain_events_start, n, self.possession, self.last_end_reason,
+        self._rewind_and_recommit(chain)
+
+    def choose_in_goal_outcome(self, outcome: str):
+        """The in-goal chip: try / held up / drop-out for the last chain.
+
+        Same rewind-and-redo as reclassify_segment, because switching away
+        from a try has to un-log the try event and the points that came with
+        it — replaying the commit is the only way that stays consistent.
+        """
+        chain = self.last_chain
+        if chain is None or self._precommit is None or self.in_goal_choice is None:
+            return
+        self._in_goal_override = outcome
+        self._rewind_and_recommit(chain)
+
+    def _rewind_and_recommit(self, chain):
+        (self._chain_events_start, n, na, self.possession, self.last_end_reason,
          self._pending_try, self.pending_start_reason,
          self.armed_next_action) = self._precommit
         del self.events[n:]
+        del self.actions[na:]
         self._undo = self._precommit[1:]   # the re-committed chain stays undoable
         self._commit_chain(chain)
 
@@ -230,9 +328,10 @@ class MatchState:
         """
         if self._undo is None:
             return
-        (n, possession, reason, pending_try,
+        (n, na, possession, reason, pending_try,
          start_reason, armed) = self._undo
         del self.events[n:]
+        del self.actions[na:]
         self.possession = possession
         self.last_end_reason = reason
         self._pending_try = pending_try
@@ -241,6 +340,7 @@ class MatchState:
         self._undo = None
         self.last_chain = None
         self.last_origin = None
+        self._last_penalty = None   # its event may have just been truncated
         self.last_summary = ""
         self._changed()
 
@@ -271,11 +371,40 @@ class MatchState:
         self.pending_start_reason = reason
         self.last_origin = ChainOrigin(reason, team, mark)
         if reason == "penalty":
-            self.events.append({"type": config.PENALTY_WON_TYPE,
-                                "team": self.team_names[team],
-                                "minute": round(self.clock.minute(t), 1)})
+            ev = {"type": config.PENALTY_WON_TYPE,
+                  "team": self.team_names[team],
+                  "minute": round(self.clock.minute(t), 1)}
+            self.events.append(ev)
+            self._last_penalty = ev       # a reason chip may annotate it
+            self.penalty_reason = None     # unknown until picked
             self.armed_next_action = config.PENALTY_DEFAULT_OPTION
             self.penalty_option = config.PENALTY_DEFAULT_OPTION
+        self._changed()
+
+    def choose_penalty_reason(self, reason: str):
+        """The penalty-reason chip: why it was given (a line can't show it).
+
+        Writes onto the penalty_won event itself as an optional extra the
+        momentum translator ignores; ignoring the chip leaves it absent.
+        """
+        self.penalty_reason = reason
+        if self._last_penalty is not None:
+            self._last_penalty["reason"] = reason
+        self._changed()
+
+    def _log_error(self, k: str, t: float):
+        """Knock-on / forward pass / handling error — the negative ledger.
+
+        A pure annotation into the action stream: the turnover it causes is
+        already handled by chain-end inference. Attributed to whoever holds the
+        ball, so tap it while tracing the action that went wrong.
+        """
+        self.actions.append({
+            "type": "error",
+            "kind": config.ERROR_KEYS[k],
+            "team": self.team_names[self.possession],
+            "minute": round(self.clock.minute(t), 1),
+        })
         self._changed()
 
     def choose_penalty_option(self, option: str):
@@ -311,9 +440,38 @@ class MatchState:
             self.last_chain.segments[-1].points if self.last_chain else None)
         return (pts[-1].x, pts[-1].y) if pts else None
 
+    def _in_goal_attacker(self, segments) -> str:
+        """Whose try it is: the side attacking the in-goal the trace ended in."""
+        end = segments[-1].points[-1]
+        return _other(in_goal_defender(self.cal, end.x, self.attack_dir_home))
+
+    def _log_try(self, team_key: str, t: float, player: Optional[int] = None,
+                 assist: Optional[int] = None):
+        """Append a try and arm the conversion listener. Tapped or inferred.
+
+        player/assist are the scorer's and last-passer's jersey numbers when a
+        traced try carried player tags; both stay absent otherwise (a T-tapped
+        try mid-chain has no committed segment to read). They ride as optional
+        extras the momentum translator ignores, like the existing label.
+        """
+        minute = round(self.clock.minute(t), 1)
+        name = self.team_names[team_key]
+        ev = {"type": "try", "team": name, "minute": minute,
+              "label": f"{name} try {int(minute)}'"}
+        if player is not None:
+            ev["player"] = player
+        if assist is not None:
+            ev["assist"] = assist
+        self.events.append(ev)
+        self._pending_try = (team_key, t + config.CONVERSION_LISTEN_S)
+
     # --- discrete events -----------------------------------------------------
     def _discrete_event(self, k: str, t: float):
         etype = config.DISCRETE_EVENT_KEYS[k]
+        if etype == "try":
+            self._log_try(self.possession, t)
+            self._changed()
+            return
         minute = round(self.clock.minute(t), 1)
         if etype == "turnover_won":
             team_key = _other(self.possession)
@@ -325,10 +483,7 @@ class MatchState:
             team_key = self.possession
         name = self.team_names[team_key]
         ev = {"type": etype, "team": name, "minute": minute}
-        if etype == "try":
-            ev["label"] = f"{name} try {int(minute)}'"
-            self._pending_try = (team_key, t + config.CONVERSION_LISTEN_S)
-        elif etype == "penalty_try":
+        if etype == "penalty_try":
             # already worth the conversion, so it must NOT arm the C/M listener
             ev["label"] = f"{name} penalty try {int(minute)}'"
         elif etype in config.CARD_TYPES:
@@ -351,7 +506,14 @@ class MatchState:
 
     # --- misc ------------------------------------------------------------------
     def halftime_flip(self):
+        """Swap ends, and hand the second-half kickoff to the other side."""
         self.attack_dir_home = -self.attack_dir_home
+        self.possession = _other(self.kickoff_team)
+        self.pending_start_reason = "kickoff"
+        self.armed_next_action = None
+        self.last_origin = ChainOrigin("kickoff", self.possession,
+                                       halfway_mark(self.cal))
+        self.in_goal_choice = None
         self._changed()
 
     def _changed(self):
@@ -363,17 +525,24 @@ class MatchState:
         return {
             "teams": self.team_names,
             "team_colors": self.team_colors,
+            "date": self.date,
+            "competition": self.competition,
             "possession": self.possession,
+            "kickoff_team": self.kickoff_team,
             "attack_dir_home": self.attack_dir_home,
             "clock_seconds": self.clock.seconds(),
             "events": self.events,
+            "actions": self.actions,
         }
 
     @classmethod
     def from_dict(cls, d: dict) -> "MatchState":
         m = cls(d["teams"]["home"], d["teams"]["away"],
                 attack_dir_home=d["attack_dir_home"], possession=d["possession"],
-                team_colors=d.get("team_colors"))
+                team_colors=d.get("team_colors"), date=d.get("date", ""),
+                competition=d.get("competition", ""))
         m.clock = MatchClock(base_seconds=d["clock_seconds"])  # rehydrates paused
         m.events = list(d["events"])
+        m.actions = list(d.get("actions", []))   # absent in pre-overhaul sessions
+        m.kickoff_team = d.get("kickoff_team", d["possession"])
         return m

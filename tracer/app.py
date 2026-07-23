@@ -19,6 +19,7 @@ from .devpanel import build_dev_panel
 from .events import compute_score
 from .export import export_json
 from .pitch import pitch_svg
+from .raw_export import export_raw
 from .review import open_review
 from .setup import setup_form
 
@@ -82,7 +83,10 @@ def index(dev: bool = False):  # ?dev=1 enables the dev drawer
                     .style(f"background:{m.team_colors['home']}")
                 away_chip = ui.label().classes(chip_cls) \
                     .style(f"background:{m.team_colors['away']}")
-                status_lbl = ui.label().classes("text-lg")
+                poss_lbl = ui.label().classes(
+                    "px-4 py-1 rounded-full text-white text-3xl font-bold "
+                    "shadow-lg")
+                status_lbl = ui.label().classes("text-sm text-gray-500")
                 ui.button("Halftime flip", on_click=m.halftime_flip).props("outline")
                 ui.button("Review", on_click=lambda: open_review(m)).props("outline")
                 ui.button("Undo", icon="undo", on_click=undo).props("outline") \
@@ -105,14 +109,28 @@ def index(dev: bool = False):  # ?dev=1 enables the dev drawer
                         ui.notify(f"exported {path_in.value}", type="positive")
 
                 ui.button("Validate + export", on_click=do_export)
+
+                data_dir = ui.input(
+                    "Data folder",
+                    value=f"exports/{m.team_names['home']}_v_{m.team_names['away']}"
+                ).classes("w-64")
+
+                def do_data_export():
+                    path = export_raw(data_dir.value,
+                                      {"date": m.date, "competition": m.competition},
+                                      m.team_names, m.events, m.actions)
+                    ui.notify(f"data exported to {path}", type="positive")
+
+                ui.button("Export data (CSV)", on_click=do_data_export)
                 ui.label("Trace = hold mouse · A/Space = end play · S scrum · "
                          "F penalty · K/P/R hint (or click a segment) · L break · "
                          "Shift intercept · digits player · Z/X team · "
-                         "T/N/G/V/B events · C/M conversion · Ctrl+Z undo"
+                         "T/N/G/V/B events · C/M conversion · "
+                         "E/W/H knock-on/fwd-pass/handling · Ctrl+Z undo"
                          ).classes("text-xs text-gray-500")
 
         # last score and direction drawn, so a change can react to itself
-        shown = {"score": None, "dir": m.attack_dir_home}
+        shown = {"score": None, "dir": m.attack_dir_home, "poss": None}
 
         def refresh():
             secs = int(m.clock.seconds())
@@ -130,9 +148,12 @@ def index(dev: bool = False):  # ?dev=1 enables the dev drawer
             shown["score"] = dict(score)
             poss_dir = m.attack_dir_home if m.possession == "home" else -m.attack_dir_home
             reason = REASON_TEXT.get(m.last_end_reason)
-            status_lbl.text = (f"{m.team_names[m.possession]} {DIR_ARROWS[poss_dir]}"
-                               + (f" · {reason}" if reason else "")
-                               + f" · {len(m.events)} events")
+            poss_lbl.text = f"{m.team_names[m.possession]} {DIR_ARROWS[poss_dir]}"
+            if shown["poss"] != m.possession:   # restyle only on a real change
+                shown["poss"] = m.possession
+                poss_lbl.style(f"background:{m.team_colors[m.possession]}")
+            status_lbl.text = ((f"{reason} · " if reason else "")
+                               + f"{len(m.events)} events")
 
         def committed(chain):
             canvas.render_segments(chain.segments)

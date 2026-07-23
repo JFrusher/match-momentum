@@ -54,7 +54,8 @@ def format_report(debug: dict, chain) -> str:
     for i, ev in enumerate(d.get("segments", [])):
         label = ev["action_geo"]
         if i < len(final) and final[i] != ev["action_geo"]:
-            label = f"{ev['action_geo']}->{final[i]} (hint)"
+            why = "restart" if ev.get("forced_by") else "hint"
+            label = f"{ev['action_geo']}->{final[i]} ({why})"
         arrow = "->" if ev["attack_dir"] > 0 else "<-"
         lines.append(f"  #{i} {label:<20} rule={ev['rule']:<24}"
                      f" fwd {ev['forward_px']:+7.1f}px lat {ev['lateral_px']:+7.1f}px"

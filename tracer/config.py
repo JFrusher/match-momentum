@@ -107,10 +107,33 @@ CONVERSION_KEYS = {"c": "conversion", "m": "conversion_missed"}
 # the tracer says what happened, the translator says what it is worth.
 START_REASONS = ("kickoff", "restart", "drop_out_22", "scrum", "lineout",
                  "penalty", "turnover_open", "interception", "kick_return")
+# Taken from the centre spot, always as a drop kick. Both facts are certain
+# before the trace exists, so the start point is snapped there and the first
+# segment is a KICK whatever its shape — a restart tapped short would
+# otherwise read as a carry and hand the ball to the wrong side.
+CENTRE_SPOT_REASONS = ("kickoff", "restart")
+CHIP_CLEARANCE_M = 9        # how far a chip sits off a mark you must press on
 TAPPED_START_REASONS = {"s": "scrum", "f": "penalty"}
 PENALTY_WON_TYPE = "penalty_won"   # the discrete event an F tap also logs
 PENALTY_OPTIONS = ("kick_to_touch", "at_goal", "tap_and_go", "scrum")
 PENALTY_DEFAULT_OPTION = "kick_to_touch"
+# What a trace ending over a try line meant. Grounding is the one thing a line
+# genuinely cannot show, so this is a chooser like the penalty options: the
+# geometry picks the likely one, ignoring the chip accepts it.
+IN_GOAL_OUTCOMES = ("try", "held_up", "drop_out")
+
+# Start reasons that are set pieces: their win/loss is inferred from who fed
+# the ball vs who came away with it (events.set_piece_record).
+SET_PIECE_REASONS = ("scrum", "lineout")
+
+# --- discipline / errors --------------------------------------------------
+# The penalty reason is a thing a traced line cannot show, so it is a chooser
+# chip like the penalty options — absent until picked (missing pieces allowed).
+PENALTY_REASONS = ("offside", "high", "ruck", "scrum", "foul", "other")
+# Errors are pure data annotations: the turnover they cause is already inferred
+# at chain end, so tapping one only records what went wrong and against whom.
+# Tap while tracing the action that erred — the erring team is who holds the ball.
+ERROR_KEYS = {"e": "knock_on", "w": "forward_pass", "h": "handling"}
 
 # --- scoring (rugby union point values) -----------------------------------
 # ponytail: union only; swap this map for another code's values if needed.

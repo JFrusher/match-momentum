@@ -38,9 +38,7 @@ def training_set():
              if "actions" in sc.expect
              and not any(k in HINT_KEYS for _, k in sc.taps)]
     for name, sc in cases:
-        m = MatchState("HOME", "AWAY", attack_dir_home=sc.attack_dir,
-                       possession=sc.possession)
-        m.clock.start(t=0.0)
+        m = fixtures.open_play_match(sc.attack_dir, sc.possession)
         fixtures.inject(m, sc)
         segs = m.last_chain.segments if m.last_chain else []
         if len(segs) != len(sc.expect["actions"]):

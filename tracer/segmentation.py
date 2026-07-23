@@ -17,9 +17,12 @@ corrected by an R type-hint tap or in review.
 """
 
 import math
+from typing import Literal, Optional
 
 from . import config, features
 from .continuity import PathPoint, PlayerTag, Segment
+
+Action = Literal["CARRY", "PASS", "KICK"]
 
 # Evidence from the most recent segment_path() + apply_taps() call, for the
 # dev panel. Rebuilt per call; MatchState snapshots a reference per chain.
@@ -315,8 +318,15 @@ def apply_taps(segments: list[Segment], taps, shift_intervals) -> list[Segment]:
     return segments
 
 
-def segment_path(points: list[PathPoint], attack_dir: int) -> list[Segment]:
-    """Split one traced path into classified Segments. attack_dir: +1 = +x, -1 = -x."""
+def segment_path(points: list[PathPoint], attack_dir: int,
+                 force_first: Optional[Action] = None) -> list[Segment]:
+    """Split one traced path into classified Segments. attack_dir: +1 = +x, -1 = -x.
+
+    force_first overrides the first segment's class where the laws of the game
+    already settle it (a restart is a kick, however it was drawn). It is
+    applied inside the loop, not patched on afterwards, so the direction flip
+    a KICK causes reaches the segments that follow it.
+    """
     global last_debug
     d: dict = {"rejected": None}
     last_debug = d
@@ -355,8 +365,11 @@ def segment_path(points: list[PathPoint], attack_dir: int) -> list[Segment]:
     slices.append(smoothed[prev:])
 
     segments, direction = [], attack_dir
-    for sl in slices:
+    for i, sl in enumerate(slices):
         action, evidence = _classify(sl, direction)
+        if i == 0 and force_first:
+            evidence["forced_by"] = force_first
+            action = force_first
         d["segments"].append(evidence)
         segments.append(Segment(action=action, points=sl,
                                 scores=evidence["scores"],

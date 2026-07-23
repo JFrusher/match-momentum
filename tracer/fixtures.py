@@ -307,11 +307,25 @@ def check(match, expect: dict) -> list[str]:
     return out
 
 
+def open_play_match(attack_dir=1, possession="home",
+                    home="HOME", away="AWAY") -> MatchState:
+    """A MatchState with no set piece pending, clock running.
+
+    A corpus case is a bare traced line being judged on its geometry, but a
+    freshly built match is legitimately waiting on a kickoff — which snaps the
+    start to the centre spot and forces the first segment to a KICK. Clearing
+    the pending reason is what makes the scenario mean what it says.
+    """
+    m = MatchState(home, away, attack_dir_home=attack_dir,
+                   possession=possession)
+    m.pending_start_reason = None
+    m.clock.start(t=0.0)
+    return m
+
+
 def run(sc: Scenario) -> list[str]:
     """Fresh MatchState -> inject -> check. The uniform corpus runner."""
-    m = MatchState("HOME", "AWAY", attack_dir_home=sc.attack_dir,
-                   possession=sc.possession)
-    m.clock.start(t=0.0)
+    m = open_play_match(sc.attack_dir, sc.possession)
     inject(m, sc)
     return check(m, sc.expect)
 
@@ -319,10 +333,7 @@ def run(sc: Scenario) -> list[str]:
 def run_trace_file(path) -> list[str]:
     """Saved-trace JSON -> fresh MatchState -> inject_raw -> check."""
     d = json.loads(Path(path).read_text(encoding="utf-8"))
-    m = MatchState("HOME", "AWAY",
-                   attack_dir_home=d.get("attack_dir_home", 1),
-                   possession=d.get("possession", "home"))
-    m.clock.start(t=0.0)
+    m = open_play_match(d.get("attack_dir_home", 1), d.get("possession", "home"))
     inject_raw(m, d["points"], d.get("taps", ()), d.get("shift", ()))
     return check(m, d.get("expect", {}))
 

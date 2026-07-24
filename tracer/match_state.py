@@ -14,7 +14,7 @@ from .events import (actor, assign_teams, chain_to_actions, chain_to_events,
                      ChainOrigin, default_in_goal_outcome, halfway_mark,
                      in_goal_defender, infer_origin, penalty_at_goal_scored,
                      set_piece_record, summarise, RESTART_SCORE_TYPES)
-from .geometry import PitchCalibration
+from .geometry import canonical_xy, PitchCalibration
 from .keystate import KeyState
 from .segmentation import apply_taps, segment_path
 
@@ -66,6 +66,11 @@ class MatchState:
         self.possession = possession
         self.kickoff_team = possession   # who kicked off; the other side does H2
         self.attack_dir_home = attack_dir_home
+        # the first-half orientation. Every exported position is folded back to
+        # this frame (see _flipped / geometry.canonical_xy) so second-half data
+        # shares one orientation with the first — heatmaps and per-team maps
+        # aggregate across the whole match instead of splitting to both ends.
+        self.canon_attack_dir_home = attack_dir_home
         self.cal = cal or PitchCalibration()
         self.clock = MatchClock()
         self.keystate = KeyState()
@@ -287,18 +292,20 @@ class MatchState:
         self.last_end_reason = ("score" if scored_team
                                 else "kick" if segments[-1].action == "KICK"
                                 else "turnover")
+        flip = self._flipped()
         new_events = chain_to_events(
             chain, self.team_names, self.attack_dir_home, self.cal,
-            start_reason=began_as)
+            start_reason=began_as, flip=flip)
         self.events.extend(new_events)
         self.actions.extend(chain_to_actions(
-            chain, self.team_names, self.attack_dir_home, self.cal))
+            chain, self.team_names, self.attack_dir_home, self.cal, flip=flip))
         # a chain that BEGAN at a set piece records its outcome: the awarded
         # team (possession at mouse_down) fed it; chain.team came away with it
         sp = set_piece_record(began_as, self._chain_start_team, chain.team,
                               self.team_names, chain.start_minute)
         if sp:
-            self.actions.append(sp)
+            self.actions.append(self._stamp(
+                sp, self._pos_m((segments[0].points[0].x, segments[0].points[0].y))))
         if try_team:
             last = segments[-1]
             prev = segments[-2] if len(segments) >= 2 else None
@@ -400,7 +407,11 @@ class MatchState:
         if reason == "penalty":
             ev = {"type": config.PENALTY_WON_TYPE,
                   "team": self.team_names[team],
+                  # the side that gave it away, so a coach can map their own
+                  # discipline (where they were penalised) not just penalties won
+                  "conceded_by": self.team_names[held_by],
                   "minute": round(self.clock.minute(t), 1)}
+            self._stamp(ev, self._pos_m(mark))   # where the penalty happened
             self.events.append(ev)
             self._last_penalty = ev       # a reason chip may annotate it
             self.penalty_reason = None     # unknown until picked
@@ -426,12 +437,12 @@ class MatchState:
         already handled by chain-end inference. Attributed to whoever holds the
         ball, so tap it while tracing the action that went wrong.
         """
-        self.actions.append({
+        self.actions.append(self._stamp({
             "type": "error",
             "kind": config.ERROR_KEYS[k],
             "team": self.team_names[self.possession],
             "minute": round(self.clock.minute(t), 1),
-        })
+        }))
         self._changed()
 
     def choose_penalty_option(self, option: str):
@@ -472,6 +483,45 @@ class MatchState:
             self.last_chain.segments[-1].points if self.last_chain else None)
         return (pts[-1].x, pts[-1].y) if pts else None
 
+    def _flipped(self) -> bool:
+        """Is play currently in the ends-swapped (second-half) orientation?
+
+        True once halftime_flip has reversed attack_dir_home from the frame the
+        match began in. Everything exported with a position folds by this so the
+        whole match reads in one orientation.
+        """
+        return self.attack_dir_home != self.canon_attack_dir_home
+
+    def _pos_m(self, pt):
+        """(x_m, y_m) field-metre for a pixel point, or None.
+
+        Folded into the first-half frame when the ends are swapped, the same as
+        traced actions (events.chain_to_actions), so a tapped event plots and
+        heatmaps consistently across both halves.
+        """
+        if pt is None:
+            return None
+        x, y = canonical_xy(self.cal.field_x_m(pt[0]), self.cal.field_y_m(pt[1]),
+                            self._flipped())
+        return (round(x, 1), round(y, 1))
+
+    def _here_m(self):
+        """Where the ball was last seen, in field metres — the live pointer
+        mid-trace, else the last committed point. Position for a tapped event."""
+        return self._pos_m(self._last_point())
+
+    def _stamp(self, ev, pos=None):
+        """Attach x_m/y_m to an event dict when a position is known.
+
+        Optional, like the existing label/player extras: an event tapped before
+        anything was traced simply carries no position, and every reader
+        tolerates its absence.
+        """
+        pos = self._here_m() if pos is None else pos
+        if pos is not None:
+            ev["x_m"], ev["y_m"] = pos
+        return ev
+
     def _in_goal_attacker(self, segments) -> str:
         """Whose try it is: the side attacking the in-goal the trace ended in."""
         end = segments[-1].points[-1]
@@ -488,8 +538,8 @@ class MatchState:
         """
         minute = round(self.clock.minute(t), 1)
         name = self.team_names[team_key]
-        ev = {"type": "try", "team": name, "minute": minute,
-              "label": f"{name} try {int(minute)}'"}
+        ev = self._stamp({"type": "try", "team": name, "minute": minute,
+                          "label": f"{name} try {int(minute)}'"})
         if player is not None:
             ev["player"] = player
         if assist is not None:
@@ -502,8 +552,8 @@ class MatchState:
         N-tapped penalty_kick, and restarts play like any goal."""
         minute = round(self.clock.minute(t), 1)
         name = self.team_names[team_key]
-        self.events.append({"type": "penalty_kick", "team": name,
-                            "minute": minute, "label": f"{name} penalty {int(minute)}'"})
+        self.events.append(self._stamp({"type": "penalty_kick", "team": name,
+                            "minute": minute, "label": f"{name} penalty {int(minute)}'"}))
 
     # --- discrete events -----------------------------------------------------
     def _discrete_event(self, k: str, t: float):
@@ -522,7 +572,7 @@ class MatchState:
         else:
             team_key = self.possession
         name = self.team_names[team_key]
-        ev = {"type": etype, "team": name, "minute": minute}
+        ev = self._stamp({"type": etype, "team": name, "minute": minute})
         if etype == "penalty_try":
             # already worth the conversion, so it must NOT arm the C/M listener
             ev["label"] = f"{name} penalty try {int(minute)}'"
@@ -537,16 +587,21 @@ class MatchState:
             return
         team_key, _ = self._pending_try
         self._pending_try = None
-        self.events.append({
+        self.events.append(self._stamp({
             "type": config.CONVERSION_KEYS[k],
             "team": self.team_names[team_key],
             "minute": round(self.clock.minute(t), 1),
-        })
+        }))
         self._changed()
 
     # --- misc ------------------------------------------------------------------
     def halftime_flip(self):
-        """Swap ends, and hand the second-half kickoff to the other side."""
+        """Swap ends, and hand the second-half kickoff to the other side.
+
+        canon_attack_dir_home is left untouched, so attack_dir_home now differs
+        from it (_flipped() is True) and every position exported in the second
+        half is folded back to the first-half frame.
+        """
         self.attack_dir_home = -self.attack_dir_home
         self.possession = _other(self.kickoff_team)
         self.pending_start_reason = "kickoff"
@@ -570,6 +625,7 @@ class MatchState:
             "possession": self.possession,
             "kickoff_team": self.kickoff_team,
             "attack_dir_home": self.attack_dir_home,
+            "canon_attack_dir_home": self.canon_attack_dir_home,
             "clock_seconds": self.clock.seconds(),
             "events": self.events,
             "actions": self.actions,
@@ -585,4 +641,7 @@ class MatchState:
         m.events = list(d["events"])
         m.actions = list(d.get("actions", []))   # absent in pre-overhaul sessions
         m.kickoff_team = d.get("kickoff_team", d["possession"])
+        # pre-overhaul sessions never flipped in the data; treat their current
+        # orientation as canonical so nothing is spuriously folded on resume
+        m.canon_attack_dir_home = d.get("canon_attack_dir_home", d["attack_dir_home"])
         return m

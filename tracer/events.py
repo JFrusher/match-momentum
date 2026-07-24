@@ -14,7 +14,7 @@ _territory_weight() stay the single source of truth.
 from dataclasses import dataclass
 
 from . import config
-from .geometry import PitchCalibration
+from .geometry import canonical_xy, PitchCalibration
 
 # Score types that end a possession and trigger a restart (the conceding team
 # takes the drop kick). Conversions follow a try by the same team, so they
@@ -203,8 +203,13 @@ def compute_score(events, team_names: dict) -> dict:
 
 def chain_to_events(chain, team_names: dict, attack_dir_home: int,
                     cal: PitchCalibration = PitchCalibration(),
-                    start_reason: str = None) -> list[dict]:
-    """chain.segments must already be tap-applied and team-assigned."""
+                    start_reason: str = None, flip: bool = False) -> list[dict]:
+    """chain.segments must already be tap-applied and team-assigned.
+
+    `flip` folds any exported position into the first-half frame (second-half
+    ends swapped); see geometry.canonical_xy. phase_sequence carries only
+    orientation-independent metres, so only the interception point is folded.
+    """
     if not chain.segments:
         return []
     t0 = chain.t0
@@ -249,10 +254,13 @@ def chain_to_events(chain, team_names: dict, attack_dir_home: int,
             ev["players"] = players  # harmless extra, ignored by the translator
         out.append(ev)
         if i > 0 and subs[i - 1][-1].action == "PASS":  # team changed on an interception
+            # where the ball was picked off — the gaining run's first point
+            ix, iy = canonical_xy(cal.field_x_m(start_pt.x), cal.field_y_m(start_pt.y), flip)
             out.append({
                 "type": "turnover_won",
                 "team": team_names[team],
                 "minute": minute_at(sub[0].start_t),
+                "x_m": round(ix, 1), "y_m": round(iy, 1),
             })
     return out
 
@@ -292,7 +300,8 @@ def set_piece_record(reason: str, feed_team: str, secured_team: str,
 
 
 def chain_to_actions(chain, team_names: dict, attack_dir_home: int,
-                     cal: PitchCalibration = PitchCalibration()) -> list[dict]:
+                     cal: PitchCalibration = PitchCalibration(),
+                     flip: bool = False) -> list[dict]:
     """One dict per segment: the rich per-action stream for the raw export.
 
     Parallel to chain_to_events, which collapses segments into phase_sequences
@@ -300,6 +309,11 @@ def chain_to_actions(chain, team_names: dict, attack_dir_home: int,
     coach gets per-action detail. chain.segments must already be tap-applied
     and team-assigned. Optional fields (linebreak/intercepted/player) are only
     present when set, so a partially-tagged chain is still valid data.
+
+    `flip` (second half) folds the exported coordinates into the first-half
+    frame and reports attack_dir in that same frame, so a team attacks the
+    same way in the data all match. metres_gained / end_metres_from_line are
+    computed from the live attack_dir and stay correct either way.
     """
     if not chain.segments:
         return []
@@ -312,6 +326,8 @@ def chain_to_actions(chain, team_names: dict, attack_dir_home: int,
     for seg in chain.segments:
         attack_dir = attack_dir_home if seg.team == "home" else -attack_dir_home
         start_pt, end_pt = seg.points[0], seg.points[-1]
+        sx, sy = canonical_xy(cal.field_x_m(start_pt.x), cal.field_y_m(start_pt.y), flip)
+        ex, ey = canonical_xy(cal.field_x_m(end_pt.x), cal.field_y_m(end_pt.y), flip)
         ev = {
             "type": seg.action.lower(),   # "carry" / "pass" / "kick"
             "team": team_names[seg.team],
@@ -319,13 +335,11 @@ def chain_to_actions(chain, team_names: dict, attack_dir_home: int,
             "metres_gained": cal.metres_gained(start_pt.x, end_pt.x, attack_dir),
             "end_metres_from_line": cal.end_metres_from_line(end_pt.x, attack_dir),
             # absolute pitch coordinates in metres (x 0..100 field, in-goal
-            # beyond; y 0..width). With team + attack_dir the analyst can
-            # normalise per half and build heatmaps / plot the action arrow.
-            "start_x_m": round(cal.field_x_m(start_pt.x), 1),
-            "start_y_m": round(cal.field_y_m(start_pt.y), 1),
-            "end_x_m": round(cal.field_x_m(end_pt.x), 1),
-            "end_y_m": round(cal.field_y_m(end_pt.y), 1),
-            "attack_dir": attack_dir,
+            # beyond; y 0..width), folded into the first-half frame so both
+            # halves share one orientation for heatmaps / arrows.
+            "start_x_m": round(sx, 1), "start_y_m": round(sy, 1),
+            "end_x_m": round(ex, 1), "end_y_m": round(ey, 1),
+            "attack_dir": -attack_dir if flip else attack_dir,   # canonical (first-half) sense
         }
         if seg.linebreak:
             ev["linebreak"] = True

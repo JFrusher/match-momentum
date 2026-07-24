@@ -114,3 +114,19 @@ class PitchCalibration:
         if self.in_own_22(kick_start_x_px, attack_dir):
             return exit_x_px
         return kick_start_x_px
+
+
+def canonical_xy(field_x_m: float, field_y_m: float, flip: bool) -> tuple:
+    """Fold a position into the first-half frame.
+
+    Swapping ends at halftime is a 180-degree rotation of the pitch about its
+    centre, so a second-half position maps (x, y) -> (LENGTH - x, WIDTH - y).
+    Applying this to every exported coordinate keeps the whole match in one
+    orientation: a team's attacking half, its heatmap, its penalty positions
+    all aggregate across both halves instead of splitting to opposite ends.
+    Metres-based fields (metres_gained, end_metres_from_line) are already
+    orientation-independent — they read attack_dir — so only x/y need folding.
+    """
+    if not flip:
+        return field_x_m, field_y_m
+    return (config.PITCH_LENGTH_M - field_x_m, config.PITCH_WIDTH_M - field_y_m)

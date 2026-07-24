@@ -6,10 +6,11 @@ per-action rows plus set-piece / penalty-reason / error records. This dumps
 them for a squad to slice in a spreadsheet, plus one JSON that preserves
 structure:
 
-  actions.csv  one row per carry/pass/kick and per discrete event
-  players.csv  per-jersey attacking + scoring totals
-  team.csv     per-team scalar summary
-  match.json   meta + full action stream + both summaries
+  actions.csv    one row per carry/pass/kick and per discrete event
+  players.csv    per-jersey attacking + scoring totals
+  team.csv       per-team scalar summary
+  positions.csv  one row per located thing (x_m/y_m), for heatmaps
+  match.json     meta + full action stream + both summaries
 
 Everything tolerates missing fields: a column is blank when a match never
 tagged that piece, which is the whole point — get out whatever was captured.
@@ -145,8 +146,13 @@ def team_summary(events: list[dict], actions: list[dict], team_names: dict) -> d
 # --- writers ----------------------------------------------------------------
 _ACTION_COLS = ["minute", "type", "team", "player", "kind", "outcome", "reason",
                 "metres_gained", "start_x_m", "start_y_m", "end_x_m", "end_y_m",
+                "x_m", "y_m",   # single-point position for discrete events
                 "end_metres_from_line", "attack_dir", "linebreak", "intercepted",
-                "assist", "label"]
+                "conceded_by", "assist", "label"]
+# positions.csv: every located thing as one point row. A carry/pass/kick uses
+# its start as the point (with its end kept), a discrete event its own x_m/y_m.
+_POSITION_COLS = ["minute", "type", "team", "conceded_by", "x_m", "y_m",
+                  "end_x_m", "end_y_m", "kind", "outcome", "reason", "label"]
 _PLAYER_COLS = ["team", "number", "carries", "carry_metres", "linebreaks",
                 "kicks", "kick_metres", "tries", "assists"]
 _TEAM_COLS = ["team", "points", "possessions", "metres", "carries",
@@ -167,6 +173,28 @@ def _write_csv(path: Path, cols: list[str], rows: list[dict]):
 def _action_cols(stream: list[dict]) -> list[dict]:
     present = {k for e in stream for k in e}
     return [k for k in _ACTION_COLS if k in present] + sorted(present - set(_ACTION_COLS))
+
+
+def position_rows(stream: list[dict]) -> list[dict]:
+    """One row per located thing, projected to a single (x_m, y_m) point.
+
+    A traced action's start is its point (its end is kept so a line can still
+    be drawn); a discrete event uses its own stamped x_m/y_m. Anything with no
+    position is skipped, so this is exactly what a pitch heatmap needs.
+    """
+    rows = []
+    for e in stream:
+        x = e.get("x_m", e.get("start_x_m"))
+        y = e.get("y_m", e.get("start_y_m"))
+        if x is None or y is None:
+            continue
+        rows.append({"minute": e.get("minute"), "type": e.get("type"),
+                     "team": e.get("team"), "conceded_by": e.get("conceded_by"),
+                     "x_m": x, "y_m": y,
+                     "end_x_m": e.get("end_x_m"), "end_y_m": e.get("end_y_m"),
+                     "kind": e.get("kind"), "outcome": e.get("outcome"),
+                     "reason": e.get("reason"), "label": e.get("label")})
+    return rows
 
 
 def _plain(summ: dict) -> dict:
@@ -191,6 +219,7 @@ def export_raw(out_dir, meta: dict, team_names: dict,
     _write_csv(out / "players.csv", _PLAYER_COLS, players)
     _write_csv(out / "team.csv", _TEAM_COLS,
                [{"team": n, **s} for n, s in team.items()])
+    _write_csv(out / "positions.csv", _POSITION_COLS, position_rows(stream))
     payload = {
         "meta": {"teams": team_names, "date": meta.get("date", ""),
                  "competition": meta.get("competition", "")},
